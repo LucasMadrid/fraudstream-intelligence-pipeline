@@ -1,0 +1,32 @@
+groups:
+  - name: api-ingestion-pipeline
+    rules:
+      - alert: DLQDepthNonZero
+        expr: dlq_depth{topic="txn.api.dlq"} > 0
+        for: 0m
+        labels:
+          severity: page
+          channel: api
+        annotations:
+          summary: "txn.api.dlq has unprocessable events"
+          description: "DLQ depth is {{ $value }} for topic {{ $labels.topic }}. Investigate producer errors immediately."
+
+      - alert: ProducerLatencyHigh
+        expr: histogram_quantile(0.99, rate(producer_publish_latency_ms_bucket{topic="txn.api"}[5m])) > 10
+        for: 1m
+        labels:
+          severity: warning
+          channel: api
+        annotations:
+          summary: "API producer p99 latency exceeds 10ms budget"
+          description: "p99 publish latency is {{ $value }}ms (budget: 10ms) for topic {{ $labels.topic }}."
+
+      - alert: ProducerErrorRateHigh
+        expr: rate(producer_errors_total{topic="txn.api"}[5m]) > 0.01
+        for: 2m
+        labels:
+          severity: warning
+          channel: api
+        annotations:
+          summary: "API producer error rate is elevated"
+          description: "Error rate is {{ $value }}/s for topic {{ $labels.topic }}, error_type={{ $labels.error_type }}."

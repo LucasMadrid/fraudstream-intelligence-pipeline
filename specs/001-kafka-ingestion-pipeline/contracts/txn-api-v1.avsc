@@ -1,0 +1,107 @@
+{
+  "type": "record",
+  "name": "TransactionEvent",
+  "namespace": "com.fraudstream.ingestion.api",
+  "doc": "Immutable transaction event for the API channel. Published to txn.api topic. All PII must be masked before this record is produced.",
+  "fields": [
+    {
+      "name": "transaction_id",
+      "type": "string",
+      "doc": "UUID v4. Partition key for downstream deduplication. nullable: false — every event must have a correlation ID."
+    },
+    {
+      "name": "account_id",
+      "type": "string",
+      "doc": "Account identifier. Used as Kafka partition key for stateful velocity aggregations. nullable: false."
+    },
+    {
+      "name": "merchant_id",
+      "type": "string",
+      "doc": "Merchant identifier. nullable: false."
+    },
+    {
+      "name": "amount",
+      "type": {
+        "type": "bytes",
+        "logicalType": "decimal",
+        "precision": 18,
+        "scale": 4
+      },
+      "doc": "Transaction amount. Two's-complement big-endian decimal. precision=18, scale=4. Never use float or double for monetary values. nullable: false."
+    },
+    {
+      "name": "currency",
+      "type": "string",
+      "doc": "ISO-4217 currency code (e.g. USD, EUR). nullable: false."
+    },
+    {
+      "name": "event_time",
+      "type": {
+        "type": "long",
+        "logicalType": "timestamp-millis"
+      },
+      "doc": "Event timestamp as milliseconds since Unix epoch, as reported by the caller. nullable: false."
+    },
+    {
+      "name": "processing_time",
+      "type": {
+        "type": "long",
+        "logicalType": "timestamp-millis"
+      },
+      "doc": "Timestamp set by the producer at receipt. Used for clock skew detection. nullable: false."
+    },
+    {
+      "name": "channel",
+      "type": "string",
+      "doc": "Transaction channel. Valid values: POS, WEB, MOBILE, API. Validated at producer; string type used to allow future channels without breaking schema changes. nullable: false."
+    },
+    {
+      "name": "card_bin",
+      "type": "string",
+      "doc": "First 6 digits of the payment card number (Bank Identification Number). Full PAN is masked at producer boundary. nullable: false — all card transactions must have a BIN."
+    },
+    {
+      "name": "card_last4",
+      "type": "string",
+      "doc": "Last 4 digits of the payment card number. nullable: false."
+    },
+    {
+      "name": "caller_ip_subnet",
+      "type": "string",
+      "doc": "Caller IP address truncated to /24 for IPv4 (e.g. 203.0.113.0) or /64 for IPv6. Full IP address is never stored. nullable: false — API channel always has a caller IP."
+    },
+    {
+      "name": "api_key_id",
+      "type": "string",
+      "doc": "Identifier of the API key used for this request. nullable: false — API channel always has an authenticated caller."
+    },
+    {
+      "name": "oauth_scope",
+      "type": "string",
+      "doc": "OAuth scope string from the caller's token. Recorded as-is; authorization decisions are upstream of the producer. nullable: false."
+    },
+    {
+      "name": "geo_lat",
+      "type": ["null", "float"],
+      "default": null,
+      "doc": "Geographic latitude of the transaction origin. Nullable — API clients may not provide geolocation."
+    },
+    {
+      "name": "geo_lon",
+      "type": ["null", "float"],
+      "default": null,
+      "doc": "Geographic longitude of the transaction origin. Nullable — API clients may not provide geolocation."
+    },
+    {
+      "name": "masking_lib_version",
+      "type": "string",
+      "doc": "Version of the pii-masking library used to produce this event (e.g. 1.0.0). Enables detection of masking version skew across producers. nullable: false."
+    },
+    {
+      "name": "schema_version",
+      "type": "string",
+      "default": "1",
+      "doc": "Schema version identifier. Incremented when a breaking change requires a new topic (txn.api.v2). nullable: false."
+    }
+  ]
+}
