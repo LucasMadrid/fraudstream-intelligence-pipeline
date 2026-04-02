@@ -168,12 +168,16 @@ def test_state_size_1m_accounts_flink_rest() -> None:
         )
 
     from pyflink.common import Row, Types  # noqa: PLC0415  # type: ignore[import-untyped]
-    from pyflink.datastream import StreamExecutionEnvironment  # noqa: PLC0415  # type: ignore[import-untyped]
+    from pyflink.datastream import (
+        StreamExecutionEnvironment,  # noqa: PLC0415  # type: ignore[import-untyped]
+    )
     from pyflink.datastream.functions import (  # noqa: PLC0415  # type: ignore[import-untyped]
         KeyedProcessFunction,
         RuntimeContext,
     )
-    from pyflink.datastream.state import MapStateDescriptor  # noqa: PLC0415  # type: ignore[import-untyped]
+    from pyflink.datastream.state import (
+        MapStateDescriptor,  # noqa: PLC0415  # type: ignore[import-untyped]
+    )
 
     env = StreamExecutionEnvironment.get_execution_environment()
     env.set_parallelism(1)

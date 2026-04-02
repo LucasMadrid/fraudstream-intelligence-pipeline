@@ -17,7 +17,6 @@ The test is excluded from the default pytest run (marked pytest.mark.perf).
 
 import time
 import uuid
-from decimal import Decimal
 
 import pytest
 
