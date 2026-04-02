@@ -54,6 +54,7 @@ markers = [
 [tool.coverage.run]
 source = ["pipelines"]
 omit = ["tests/*", "*/migrations/*"]
+relative_files = true
 
 [tool.coverage.report]
 fail_under = 80
