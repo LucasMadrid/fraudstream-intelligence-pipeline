@@ -20,6 +20,7 @@ dependencies = [
 dev = [
     "pytest>=8.0",
     "pytest-cov>=5.0",
+    "pytest-timeout>=2.3",
     "testcontainers[kafka]>=4.5",
     "hypothesis>=6.100",
     "ruff>=0.4",
