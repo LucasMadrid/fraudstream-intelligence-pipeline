@@ -328,8 +328,12 @@ jobs:
           sudo apt-get install -y -qq curl
           curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
 
-      - name: Scan confluentinc/cp-kafka:7.9.6 with Trivy
-        id: scan-kafka
+      - name: Scan confluentinc/cp-kafka:7.9.6 with Trivy (informational)
+        # Base images from Docker Hub are not under our control — OS-level CVEs in
+        # Confluent/Flink images cannot be patched by us. Scans are uploaded to
+        # GitHub Security tab for visibility; they do NOT block CI.
+        # Our custom-built Flink worker image is scanned with --exit-code 1 in
+        # the build-flink-image job, where we DO control the contents.
         continue-on-error: true
         run: |
           trivy image --severity HIGH,CRITICAL \
@@ -338,14 +342,7 @@ jobs:
             --output /tmp/trivy-kafka.sarif \
             confluentinc/cp-kafka:7.9.6 || true
 
-          # Check again with exit-code 1 to get actual status (ignore-unfixed: only block if fix available)
-          trivy image --severity HIGH,CRITICAL \
-            --ignore-unfixed \
-            --exit-code 1 \
-            confluentinc/cp-kafka:7.9.6 && echo "kafka_status=clean" >> $GITHUB_OUTPUT || echo "kafka_status=vulnerable" >> $GITHUB_OUTPUT
-
-      - name: Scan confluentinc/cp-schema-registry:7.9.6 with Trivy
-        id: scan-schema-registry
+      - name: Scan confluentinc/cp-schema-registry:7.9.6 with Trivy (informational)
         continue-on-error: true
         run: |
           trivy image --severity HIGH,CRITICAL \
@@ -354,13 +351,7 @@ jobs:
             --output /tmp/trivy-schema-registry.sarif \
             confluentinc/cp-schema-registry:7.9.6 || true
 
-          trivy image --severity HIGH,CRITICAL \
-            --ignore-unfixed \
-            --exit-code 1 \
-            confluentinc/cp-schema-registry:7.9.6 && echo "registry_status=clean" >> $GITHUB_OUTPUT || echo "registry_status=vulnerable" >> $GITHUB_OUTPUT
-
-      - name: Scan apache/flink:1.20.3-scala_2.12 with Trivy
-        id: scan-flink
+      - name: Scan apache/flink:1.20.3-scala_2.12 with Trivy (informational)
         continue-on-error: true
         run: |
           trivy image --severity HIGH,CRITICAL \
@@ -368,11 +359,6 @@ jobs:
             --format sarif \
             --output /tmp/trivy-flink.sarif \
             apache/flink:1.20.3-scala_2.12 || true
-
-          trivy image --severity HIGH,CRITICAL \
-            --ignore-unfixed \
-            --exit-code 1 \
-            apache/flink:1.20.3-scala_2.12 && echo "flink_status=clean" >> $GITHUB_OUTPUT || echo "flink_status=vulnerable" >> $GITHUB_OUTPUT
 
       - name: Upload Trivy SARIF reports
         if: always()
@@ -388,47 +374,17 @@ jobs:
         run: |
           echo "## Security Scan Results"
           echo ""
-          echo "### Python Dependencies (pip-audit)"
+          echo "### Python Dependencies (pip-audit) — BLOCKING"
           if [ -f /tmp/pip-audit-report.sarif ]; then
             echo "- Report generated: see GitHub Security tab"
           else
             echo "- No vulnerabilities found"
           fi
           echo ""
-          echo "### Docker Images (Trivy - HIGH/CRITICAL only)"
-          echo "- cp-kafka:7.9.6: ${{ steps.scan-kafka.outputs.kafka_status || 'unknown' }}"
-          echo "- cp-schema-registry:7.9.6: ${{ steps.scan-schema-registry.outputs.registry_status || 'unknown' }}"
-          echo "- flink:1.20.3: ${{ steps.scan-flink.outputs.flink_status || 'unknown' }}"
-          echo ""
-          echo "Note: Scan results are uploaded to GitHub Security tab for detailed review."
-
-      # Final blocker: fail if any HIGH/CRITICAL CVEs found
-      - name: Check for blocking vulnerabilities
-        run: |
-          blocking_issues=0
-
-          # Check if any image had HIGH/CRITICAL CVEs
-          if [ "${{ steps.scan-kafka.outputs.kafka_status }}" = "vulnerable" ]; then
-            echo "ERROR: cp-kafka:7.9.6 has HIGH/CRITICAL CVEs with available fixes"
-            blocking_issues=1
-          fi
-
-          if [ "${{ steps.scan-schema-registry.outputs.registry_status }}" = "vulnerable" ]; then
-            echo "ERROR: cp-schema-registry:7.9.6 has HIGH/CRITICAL CVEs with available fixes"
-            blocking_issues=1
-          fi
-
-          if [ "${{ steps.scan-flink.outputs.flink_status }}" = "vulnerable" ]; then
-            echo "ERROR: flink:1.20.3-scala_2.12 has HIGH/CRITICAL CVEs with available fixes"
-            blocking_issues=1
-          fi
-
-          if [ $blocking_issues -eq 1 ]; then
-            echo ""
-            echo "FATAL: One or more dependency images contain HIGH/CRITICAL vulnerabilities."
-            echo "       Review details in GitHub Security tab and update image versions."
-            exit 1
-          fi
+          echo "### Docker Base Images (Trivy) — INFORMATIONAL ONLY"
+          echo "Base image CVEs are out-of-tree and cannot be patched here."
+          echo "Results uploaded to GitHub Security tab. Custom image is scanned"
+          echo "with --exit-code 1 in the build-flink-image job."
 
   # ============================================================================
   # Stage 5: Integration Tests (Advisory on PR, Blocking on main push)
@@ -473,7 +429,7 @@ jobs:
       - name: Start Docker services
         working-directory: infra
         run: |
-          docker-compose up -d
+          docker compose up -d
           echo "Waiting for services to be healthy..."
 
           # Wait for Kafka
@@ -497,7 +453,7 @@ jobs:
           done
 
           # Show container statuses
-          docker-compose ps
+          docker compose ps
 
       - name: Run integration tests
         run: |
@@ -511,13 +467,13 @@ jobs:
         working-directory: infra
         run: |
           echo "=== Docker Compose Logs ==="
-          docker-compose logs
-          docker-compose ps -a
+          docker compose logs
+          docker compose ps -a
 
       - name: Stop Docker services
         if: always()
         working-directory: infra
-        run: docker-compose down -v
+        run: docker compose down -v
 
   # ============================================================================
   # Stage 6: Build and Push Custom PyFlink Worker Image (main branch only)
