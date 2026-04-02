@@ -148,10 +148,12 @@ def test_handle_error_dlq_write_failure_does_not_propagate():
 def test_start_metrics_server_idempotent():
     """Calling start_metrics_server twice should not raise."""
     from pipelines.ingestion.api import metrics as m
+
     m._metrics_server_started = False  # reset for test
 
     with patch("pipelines.ingestion.api.metrics.start_http_server") as mock_start:
         from pipelines.ingestion.api.metrics import start_metrics_server
+
         start_metrics_server(9999)
         start_metrics_server(9999)  # second call is a no-op
         mock_start.assert_called_once()
@@ -166,6 +168,7 @@ def test_start_metrics_server_idempotent():
 
 def test_get_tracer_returns_tracer():
     from pipelines.ingestion.api import telemetry as t
+
     t._tracer = None
     tracer = t.get_tracer()
     assert tracer is not None
@@ -174,6 +177,7 @@ def test_get_tracer_returns_tracer():
 
 def test_init_tracer_idempotent():
     from pipelines.ingestion.api import telemetry as t
+
     t._tracer = None
     tracer1 = t.init_tracer()
     tracer2 = t.init_tracer()  # should return cached
@@ -186,6 +190,7 @@ def test_init_tracer_with_endpoint():
     import sys
 
     from pipelines.ingestion.api import telemetry as t
+
     t._tracer = None
 
     # The tracer module does: from opentelemetry.exporter.otlp... import OTLPSpanExporter
@@ -353,6 +358,7 @@ def test_http_handler_400_on_validation_error():
 def test_http_handler_200_on_valid_payload():
     mock_service = MagicMock()
     from pipelines.ingestion.api.producer import PublishResult
+
     mock_service.publish.return_value = PublishResult(
         transaction_id="test-txn-id", status="accepted", latency_ms=5
     )

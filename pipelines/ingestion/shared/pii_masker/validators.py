@@ -36,9 +36,7 @@ def extract_pan_parts(pan: str) -> tuple[str, str]:
         raise InvalidPANError(f"PAN contains non-digit characters: {pan!r}")
 
     if len(digits) not in (15, 16):
-        raise InvalidPANError(
-            f"PAN length {len(digits)} is invalid (expected 15 or 16 digits)"
-        )
+        raise InvalidPANError(f"PAN length {len(digits)} is invalid (expected 15 or 16 digits)")
 
     if not _luhn_valid(digits):
         raise InvalidPANError("Luhn check failed")

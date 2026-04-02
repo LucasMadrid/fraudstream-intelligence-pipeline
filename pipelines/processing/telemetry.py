@@ -1,4 +1,5 @@
 """OTel W3C trace context propagation through the enrichment pipeline."""
+
 from __future__ import annotations
 
 from opentelemetry import propagate

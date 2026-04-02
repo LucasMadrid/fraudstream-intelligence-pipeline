@@ -104,6 +104,7 @@ def test_builder_sets_processing_time():
 
 def test_builder_rejects_invalid_pan():
     from pipelines.ingestion.shared.pii_masker import InvalidPANError
+
     cfg = MaskingConfig()
     builder = TransactionEventBuilder(cfg)
     bad = {**VALID_PAYLOAD, "card_number": "1234567890123456"}

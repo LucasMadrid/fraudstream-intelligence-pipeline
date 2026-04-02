@@ -160,20 +160,43 @@ class TestEnrichedRecordAssembler:
         from pipelines.processing.operators.enricher import EnrichedRecordAssembler
 
         assembler = EnrichedRecordAssembler()
-        record = assembler.assemble(
-            self._make_txn(), self._velocity(), self._geo(), self._device()
-        )
+        record = assembler.assemble(self._make_txn(), self._velocity(), self._geo(), self._device())
         # 36 fields per enriched-txn-v1.avsc
         expected_fields = {
-            "transaction_id", "account_id", "merchant_id", "amount", "currency",
-            "event_time", "processing_time", "channel", "card_bin", "card_last4",
-            "caller_ip_subnet", "api_key_id", "oauth_scope", "geo_lat", "geo_lon",
+            "transaction_id",
+            "account_id",
+            "merchant_id",
+            "amount",
+            "currency",
+            "event_time",
+            "processing_time",
+            "channel",
+            "card_bin",
+            "card_last4",
+            "caller_ip_subnet",
+            "api_key_id",
+            "oauth_scope",
+            "geo_lat",
+            "geo_lon",
             "masking_lib_version",
-            "vel_count_1m", "vel_amount_1m", "vel_count_5m", "vel_amount_5m",
-            "vel_count_1h", "vel_amount_1h", "vel_count_24h", "vel_amount_24h",
-            "geo_country", "geo_city", "geo_network_class", "geo_confidence",
-            "device_first_seen", "device_txn_count", "device_known_fraud",
-            "enrichment_time", "enrichment_latency_ms", "processor_version",
+            "vel_count_1m",
+            "vel_amount_1m",
+            "vel_count_5m",
+            "vel_amount_5m",
+            "vel_count_1h",
+            "vel_amount_1h",
+            "vel_count_24h",
+            "vel_amount_24h",
+            "geo_country",
+            "geo_city",
+            "geo_network_class",
+            "geo_confidence",
+            "device_first_seen",
+            "device_txn_count",
+            "device_known_fraud",
+            "enrichment_time",
+            "enrichment_latency_ms",
+            "processor_version",
             "schema_version",
         }
         assert set(record.keys()) == expected_fields
@@ -406,20 +429,34 @@ class TestJobParseArgs:
     def test_all_overrideable_options(self):
         from pipelines.processing.job import _parse_args
 
-        args = _parse_args([
-            "--kafka-brokers", "b:9092",
-            "--schema-registry", "http://sr:8081",
-            "--input-topic", "txn.api.test",
-            "--output-topic", "txn.enriched.test",
-            "--dlq-topic", "txn.dlq.test",
-            "--checkpoint-dir", "s3://bucket/ckpt",
-            "--checkpoint-interval-ms", "30000",
-            "--geoip-db-path", "/tmp/GeoLite2-City.mmdb",
-            "--parallelism", "2",
-            "--watermark-ooo-seconds", "5",
-            "--allowed-lateness-seconds", "15",
-            "--processor-version", "002@test",
-        ])
+        args = _parse_args(
+            [
+                "--kafka-brokers",
+                "b:9092",
+                "--schema-registry",
+                "http://sr:8081",
+                "--input-topic",
+                "txn.api.test",
+                "--output-topic",
+                "txn.enriched.test",
+                "--dlq-topic",
+                "txn.dlq.test",
+                "--checkpoint-dir",
+                "s3://bucket/ckpt",
+                "--checkpoint-interval-ms",
+                "30000",
+                "--geoip-db-path",
+                "/tmp/GeoLite2-City.mmdb",
+                "--parallelism",
+                "2",
+                "--watermark-ooo-seconds",
+                "5",
+                "--allowed-lateness-seconds",
+                "15",
+                "--processor-version",
+                "002@test",
+            ]
+        )
         assert args.kafka_brokers == "b:9092"
         assert args.input_topic == "txn.api.test"
         assert args.checkpoint_interval_ms == 30000
@@ -457,9 +494,7 @@ class TestJobMain:
         from pipelines.processing.job import main
 
         mock_env = MagicMock()
-        with mock_patch(
-            "pipelines.processing.job.build_job", return_value=mock_env
-        ) as mock_build:
+        with mock_patch("pipelines.processing.job.build_job", return_value=mock_env) as mock_build:
             main(["--kafka-brokers", "localhost:9092", "--parallelism", "2"])
         called_config = mock_build.call_args[0][0]
         assert called_config.kafka_brokers == "localhost:9092"

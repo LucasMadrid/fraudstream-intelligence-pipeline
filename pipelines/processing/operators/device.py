@@ -20,10 +20,10 @@ _IDLE_TTL_MS = 7 * 24 * 3600 * 1000  # 7-day event-time idle TTL
 
 @dataclass(frozen=True)
 class DeviceProfileState:
-    first_seen_ms: int   # epoch ms of first transaction from this device
-    txn_count: int       # lifetime transaction count
-    known_fraud: bool    # always False in v1 (fraud label loop not wired)
-    last_seen_ms: int    # epoch ms of most recent transaction (TTL timer)
+    first_seen_ms: int  # epoch ms of first transaction from this device
+    txn_count: int  # lifetime transaction count
+    known_fraud: bool  # always False in v1 (fraud label loop not wired)
+    last_seen_ms: int  # epoch ms of most recent transaction (TTL timer)
 
 
 _NULL_DEVICE_FIELDS: dict = {
@@ -56,9 +56,7 @@ try:  # pragma: no cover
             )
             ttl_config = (
                 StateTtlConfig.new_builder(Time.days(14))
-                .set_update_type(
-                    StateTtlConfig.UpdateType.OnCreateAndWrite
-                )
+                .set_update_type(StateTtlConfig.UpdateType.OnCreateAndWrite)
                 .build()
             )
             descriptor.enable_time_to_live(ttl_config)
@@ -92,21 +90,22 @@ try:  # pragma: no cover
                 )
 
             self._state.update(updated)
-            ctx.timer_service().register_event_time_timer(
-                event_time_ms + _IDLE_TTL_MS
+            ctx.timer_service().register_event_time_timer(event_time_ms + _IDLE_TTL_MS)
+            yield (
+                txn,
+                velocity,
+                geo,
+                {
+                    "device_first_seen": updated.first_seen_ms,
+                    "device_txn_count": updated.txn_count,
+                    "device_known_fraud": updated.known_fraud,
+                },
             )
-            yield txn, velocity, geo, {
-                "device_first_seen": updated.first_seen_ms,
-                "device_txn_count": updated.txn_count,
-                "device_known_fraud": updated.known_fraud,
-            }
 
         def on_timer(self, _timestamp: int, _ctx) -> None:
             self._state.clear()
 
-        def process_element_pure(
-            self, api_key_id: str | None, event_time_ms: int
-        ) -> dict:
+        def process_element_pure(self, api_key_id: str | None, event_time_ms: int) -> dict:
             """Test-friendly: update in-memory state, return device fields dict."""
             if not api_key_id:
                 return dict(_NULL_DEVICE_FIELDS)
@@ -142,9 +141,7 @@ except ImportError:
         def __init__(self) -> None:
             self._state: dict[str, DeviceProfileState] = {}
 
-        def process_element_pure(
-            self, api_key_id: str | None, event_time_ms: int
-        ) -> dict:
+        def process_element_pure(self, api_key_id: str | None, event_time_ms: int) -> dict:
             """Update state and return device fields dict."""
             if not api_key_id:
                 return dict(_NULL_DEVICE_FIELDS)

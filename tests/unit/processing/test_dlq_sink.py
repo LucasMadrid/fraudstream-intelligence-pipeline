@@ -122,7 +122,5 @@ class TestSerialiseDlqRecord:
 
         record = self._make_record()
         serialised = serialise_dlq_record(record, schema_id=0)
-        decoded = fastavro.schemaless_reader(
-            io.BytesIO(serialised[5:]), _PARSED_DLQ_SCHEMA
-        )
+        decoded = fastavro.schemaless_reader(io.BytesIO(serialised[5:]), _PARSED_DLQ_SCHEMA)
         assert decoded["error_type"] == "SCHEMA_VALIDATION_ERROR"

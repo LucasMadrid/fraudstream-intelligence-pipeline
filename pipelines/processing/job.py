@@ -109,9 +109,7 @@ def build_job(config: ProcessorConfig):  # pragma: no cover
         .set_topics(config.input_topic)
         .set_group_id("flink-enrichment-processor")
         .set_starting_offsets(
-            KafkaOffsetsInitializer.committed_offsets(
-                KafkaOffsetResetStrategy.EARLIEST
-            )
+            KafkaOffsetsInitializer.committed_offsets(KafkaOffsetResetStrategy.EARLIEST)
         )
         .set_value_only_deserializer(SimpleStringSchema("ISO-8859-1"))
         .set_property("isolation.level", "read_committed")
@@ -136,11 +134,7 @@ def build_job(config: ProcessorConfig):  # pragma: no cover
         try:
             # SimpleStringSchema("ISO-8859-1") preserves binary fidelity;
             # re-encode with latin-1 to recover original bytes.
-            payload = (
-                raw_bytes
-                if isinstance(raw_bytes, bytes)
-                else raw_bytes.encode("latin-1")
-            )
+            payload = raw_bytes if isinstance(raw_bytes, bytes) else raw_bytes.encode("latin-1")
             txn = deserialise_raw_transaction(payload)
             yield txn
         except SchemaValidationError as exc:
@@ -149,9 +143,7 @@ def build_job(config: ProcessorConfig):  # pragma: no cover
                 source_partition=0,
                 source_offset=0,
                 original_payload_bytes=(
-                    raw_bytes
-                    if isinstance(raw_bytes, bytes)
-                    else raw_bytes.encode("latin-1")
+                    raw_bytes if isinstance(raw_bytes, bytes) else raw_bytes.encode("latin-1")
                 ),
                 error_type="SCHEMA_VALIDATION_ERROR",
                 error_message=str(exc),
@@ -162,21 +154,15 @@ def build_job(config: ProcessorConfig):  # pragma: no cover
     txn_stream = raw_bytes_stream.flat_map(deserialise_with_dlq, output_type=None)
 
     # ── Deduplication (FR-015) ───────────────────────────────────────────────
-    dedup_stream = (
-        txn_stream
-        .key_by(lambda txn: txn.transaction_id)
-        .process(TransactionDedup(), output_type=None)
+    dedup_stream = txn_stream.key_by(lambda txn: txn.transaction_id).process(
+        TransactionDedup(), output_type=None
     )
 
     # ── Velocity enrichment (FR-002, keyed by account_id) ───────────────────
     allowed_lateness_ms = config.allowed_lateness_seconds * 1000
-    velocity_stream = (
-        dedup_stream
-        .key_by(lambda txn: txn.account_id)
-        .process(
-            VelocityProcessFunction(allowed_lateness_ms=allowed_lateness_ms),
-            output_type=None,
-        )
+    velocity_stream = dedup_stream.key_by(lambda txn: txn.account_id).process(
+        VelocityProcessFunction(allowed_lateness_ms=allowed_lateness_ms),
+        output_type=None,
     )
 
     # ── Geolocation enrichment (FR-003, stateless) ───────────────────────────
@@ -186,28 +172,23 @@ def build_job(config: ProcessorConfig):  # pragma: no cover
     )
 
     # ── Device fingerprint enrichment (FR-004, keyed by api_key_id) ─────────
-    device_stream = (
-        geo_stream
-        .key_by(lambda pair: pair[0].api_key_id or "__no_device__")
-        .process(DeviceProcessFunction(), output_type=None)
+    device_stream = geo_stream.key_by(lambda pair: pair[0].api_key_id or "__no_device__").process(
+        DeviceProcessFunction(), output_type=None
     )
 
     # ── Assemble enriched record (FR-005) ────────────────────────────────────
-    enriched_stream = device_stream.flat_map(
-        EnrichedRecordAssembler(), output_type=None
-    )
+    enriched_stream = device_stream.flat_map(EnrichedRecordAssembler(), output_type=None)
 
     # ── Kafka sink (AT_LEAST_ONCE for local dev; EXACTLY_ONCE in prod) ───────
     import json  # noqa: PLC0415
+
     kafka_sink = (
         KafkaSink.builder()
         .set_bootstrap_servers(config.kafka_brokers)
         .set_record_serializer(
             KafkaRecordSerializationSchema.builder()
             .set_topic(config.output_topic)
-            .set_value_serialization_schema(
-                SimpleStringSchema()
-            )
+            .set_value_serialization_schema(SimpleStringSchema())
             .build()
         )
         .set_delivery_guarantee(DeliveryGuarantee.AT_LEAST_ONCE)
@@ -239,6 +220,7 @@ def build_job(config: ProcessorConfig):  # pragma: no cover
                     from pipelines.processing.metrics import (  # noqa: PLC0415
                         checkpoint_failures_total,
                     )
+
                     checkpoint_failures_total.inc()
                 except Exception:
                     pass
@@ -317,9 +299,7 @@ def main(argv=None):
         env = build_job(config)
         env.execute("FraudStream Enrichment Processor 002")
     except ImportError as exc:
-        logger.error(
-            "pyflink not installed — run: pip install -e '.[processing]': %s", exc
-        )
+        logger.error("pyflink not installed — run: pip install -e '.[processing]': %s", exc)
         sys.exit(1)
 
 

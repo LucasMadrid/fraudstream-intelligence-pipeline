@@ -12,9 +12,7 @@ class ProcessorConfig:
     schema_registry_url: str = field(
         default_factory=lambda: os.environ.get("SCHEMA_REGISTRY_URL", "http://localhost:8081")
     )
-    input_topic: str = field(
-        default_factory=lambda: os.environ.get("INPUT_TOPIC", "txn.api")
-    )
+    input_topic: str = field(default_factory=lambda: os.environ.get("INPUT_TOPIC", "txn.api"))
     output_topic: str = field(
         default_factory=lambda: os.environ.get("OUTPUT_TOPIC", "txn.enriched")
     )
@@ -34,9 +32,7 @@ class ProcessorConfig:
             "GEOIP_DB_PATH", "/opt/flink/geoip/GeoLite2-City.mmdb"
         )
     )
-    parallelism: int = field(
-        default_factory=lambda: int(os.environ.get("PARALLELISM", "1"))
-    )
+    parallelism: int = field(default_factory=lambda: int(os.environ.get("PARALLELISM", "1")))
     watermark_ooo_seconds: int = field(
         default_factory=lambda: int(os.environ.get("WATERMARK_OOO_SECONDS", "10"))
     )
@@ -54,7 +50,5 @@ class ProcessorConfig:
         default_factory=lambda: os.environ.get("S3_SECRET_KEY", "minioadmin")
     )
     processor_version: str = field(
-        default_factory=lambda: os.environ.get(
-            "PROCESSOR_VERSION", "002-stream-processor@1.0.0"
-        )
+        default_factory=lambda: os.environ.get("PROCESSOR_VERSION", "002-stream-processor@1.0.0")
     )

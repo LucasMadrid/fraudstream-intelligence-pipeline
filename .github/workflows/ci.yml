@@ -338,8 +338,9 @@ jobs:
             --output /tmp/trivy-kafka.sarif \
             confluentinc/cp-kafka:7.6.1 || true
 
-          # Check again with exit-code 1 to get actual status
+          # Check again with exit-code 1 to get actual status (ignore-unfixed: only block if fix available)
           trivy image --severity HIGH,CRITICAL \
+            --ignore-unfixed \
             --exit-code 1 \
             confluentinc/cp-kafka:7.6.1 && echo "kafka_status=clean" >> $GITHUB_OUTPUT || echo "kafka_status=vulnerable" >> $GITHUB_OUTPUT
 
@@ -354,6 +355,7 @@ jobs:
             confluentinc/cp-schema-registry:7.6.1 || true
 
           trivy image --severity HIGH,CRITICAL \
+            --ignore-unfixed \
             --exit-code 1 \
             confluentinc/cp-schema-registry:7.6.1 && echo "registry_status=clean" >> $GITHUB_OUTPUT || echo "registry_status=vulnerable" >> $GITHUB_OUTPUT
 
@@ -368,6 +370,7 @@ jobs:
             apache/flink:1.19-scala_2.12 || true
 
           trivy image --severity HIGH,CRITICAL \
+            --ignore-unfixed \
             --exit-code 1 \
             apache/flink:1.19-scala_2.12 && echo "flink_status=clean" >> $GITHUB_OUTPUT || echo "flink_status=vulnerable" >> $GITHUB_OUTPUT
 

@@ -49,9 +49,7 @@ def schema_registry_mock():
             def __init__(self, bootstrap_servers: str) -> None:
                 super().__init__("confluentinc/cp-schema-registry:7.6.1")
                 self.with_env("SCHEMA_REGISTRY_HOST_NAME", "schema-registry")
-                self.with_env(
-                    "SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS", bootstrap_servers
-                )
+                self.with_env("SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS", bootstrap_servers)
                 self.with_env("SCHEMA_REGISTRY_LISTENERS", "http://0.0.0.0:8081")
                 self.with_exposed_ports(8081)
 

@@ -23,21 +23,27 @@ import uuid
 
 # Concrete public IPs for realistic geo enrichment results (not subnets)
 _PUBLIC_IPS = [
-    "8.8.8.1",        # Google DNS (US)
-    "1.1.1.1",        # Cloudflare (AU)
+    "8.8.8.1",  # Google DNS (US)
+    "1.1.1.1",  # Cloudflare (AU)
     "185.60.216.35",  # Facebook (IE)
-    "151.101.1.1",    # Fastly CDN (US)
-    "104.16.0.1",     # Cloudflare (US)
-    "13.32.0.1",      # AWS CloudFront (US)
-    "31.13.64.1",     # Facebook (IE)
-    "142.250.80.1",   # Google (US)
-    "77.234.44.1",    # (NL)
-    "5.9.0.1",        # Hetzner (DE)
+    "151.101.1.1",  # Fastly CDN (US)
+    "104.16.0.1",  # Cloudflare (US)
+    "13.32.0.1",  # AWS CloudFront (US)
+    "31.13.64.1",  # Facebook (IE)
+    "142.250.80.1",  # Google (US)
+    "77.234.44.1",  # (NL)
+    "5.9.0.1",  # Hetzner (DE)
 ]
 
 _MERCHANTS = [
-    "merch-amazon", "merch-netflix", "merch-uber", "merch-airbnb",
-    "merch-spotify", "merch-apple", "merch-google", "merch-steam",
+    "merch-amazon",
+    "merch-netflix",
+    "merch-uber",
+    "merch-airbnb",
+    "merch-spotify",
+    "merch-apple",
+    "merch-google",
+    "merch-steam",
 ]
 
 _CHANNELS = ["WEB", "MOBILE", "POS", "API"]
@@ -91,15 +97,17 @@ def _consume_enriched(bootstrap_servers: str, stop_event: threading.Event) -> No
     """Background thread: tail txn.enriched and pretty-print each record."""
     from confluent_kafka import Consumer, KafkaError
 
-    consumer = Consumer({
-        "bootstrap.servers": bootstrap_servers,
-        "group.id": f"generator-monitor-{uuid.uuid4().hex[:8]}",
-        "auto.offset.reset": "latest",
-        "enable.auto.commit": True,
-    })
+    consumer = Consumer(
+        {
+            "bootstrap.servers": bootstrap_servers,
+            "group.id": f"generator-monitor-{uuid.uuid4().hex[:8]}",
+            "auto.offset.reset": "latest",
+            "enable.auto.commit": True,
+        }
+    )
     consumer.subscribe(["txn.enriched"])
 
-    _GEO_COLOR = "\033[32m"   # green
+    _GEO_COLOR = "\033[32m"  # green
     _RESET = "\033[0m"
 
     try:
@@ -205,8 +213,7 @@ def main() -> None:
     finally:
         service.flush()
         print(
-            f"\nProduced {ok}/{i} messages. "
-            "Waiting for enriched output (Ctrl+C again to exit)..."
+            f"\nProduced {ok}/{i} messages. Waiting for enriched output (Ctrl+C again to exit)..."
         )
         try:
             time.sleep(5)

@@ -193,12 +193,9 @@ def test_state_size_1m_accounts_flink_rest() -> None:
     # Each account_id is distinct → one velocity bucket per key → worst-case
     # per-key MapState footprint (no TTL eviction during the test run).
     records = [
-        Row(f"mem-{i:07d}", f"acc-{i:07d}", "1.00", base_ts_ms + i)
-        for i in range(_ACCOUNT_COUNT)
+        Row(f"mem-{i:07d}", f"acc-{i:07d}", "1.00", base_ts_ms + i) for i in range(_ACCOUNT_COUNT)
     ]
-    type_info = Types.ROW(
-        [Types.STRING(), Types.STRING(), Types.STRING(), Types.LONG()]
-    )
+    type_info = Types.ROW([Types.STRING(), Types.STRING(), Types.STRING(), Types.LONG()])
     source = env.from_collection(records, type_info=type_info)
 
     # ── Velocity operator adapted for Row input ──────────────────────────────
@@ -231,10 +228,8 @@ def test_state_size_1m_accounts_flink_rest() -> None:
             )
             yield row
 
-    keyed = (
-        source
-        .key_by(lambda r: r[1], key_type=Types.STRING())
-        .process(_RowVelocityBridge(), output_type=type_info)
+    keyed = source.key_by(lambda r: r[1], key_type=Types.STRING()).process(
+        _RowVelocityBridge(), output_type=type_info
     )
     keyed.print()  # required sink — discarded by the Flink cluster
 

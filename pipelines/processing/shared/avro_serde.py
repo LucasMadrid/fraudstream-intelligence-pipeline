@@ -97,6 +97,7 @@ def deserialise_raw_transaction(
         record = fastavro.schemaless_reader(io.BytesIO(avro_payload), _PARSED_TXN_SCHEMA)
         # fastavro returns timestamp-millis as datetime; convert to epoch ms
         import datetime as _dt
+
         for field in ("event_time", "processing_time"):
             val = record.get(field)
             if isinstance(val, _dt.datetime):

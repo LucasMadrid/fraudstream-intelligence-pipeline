@@ -59,9 +59,7 @@ try:  # pragma: no cover
             )
             ttl_config = (
                 StateTtlConfig.new_builder(Time.days(14))
-                .set_update_type(
-                    StateTtlConfig.UpdateType.OnCreateAndWrite
-                )
+                .set_update_type(StateTtlConfig.UpdateType.OnCreateAndWrite)
                 .build()
             )
             descriptor.enable_time_to_live(ttl_config)
@@ -71,24 +69,19 @@ try:  # pragma: no cover
             set_transaction_id(getattr(txn, "transaction_id", None))
 
             event_time_ms: int = ctx.timestamp()
-            current_watermark: int = (
-                ctx.timer_service().current_watermark()
-            )
+            current_watermark: int = ctx.timer_service().current_watermark()
 
             # FR-014: late events beyond allowed lateness → DLQ
             if (
                 current_watermark != _NO_WATERMARK
-                and event_time_ms
-                < current_watermark - self._allowed_lateness_ms
+                and event_time_ms < current_watermark - self._allowed_lateness_ms
             ):
                 from pipelines.processing.metrics import dlq_events_total
                 from pipelines.processing.shared.dlq_sink import (
                     build_dlq_record,
                 )
 
-                dlq_events_total.labels(
-                    error_type="LATE_EVENT_BEYOND_ALLOWED_LATENESS"
-                ).inc()
+                dlq_events_total.labels(error_type="LATE_EVENT_BEYOND_ALLOWED_LATENESS").inc()
                 dlq_record = build_dlq_record(
                     source_topic="txn.api",
                     source_partition=0,
@@ -109,27 +102,17 @@ try:  # pragma: no cover
                 return
 
             bucket_key: int = event_time_ms // 60_000
-            amount = (
-                Decimal(str(txn.amount))
-                if not isinstance(txn.amount, Decimal)
-                else txn.amount
-            )
+            amount = Decimal(str(txn.amount)) if not isinstance(txn.amount, Decimal) else txn.amount
 
             existing = self._buckets.get(bucket_key)
             if existing is None:
                 existing = (0, Decimal("0"))
-            self._buckets.put(
-                bucket_key, (existing[0] + 1, existing[1] + amount)
-            )
+            self._buckets.put(bucket_key, (existing[0] + 1, existing[1] + amount))
 
             velocity = _compute_velocity(self._buckets, bucket_key)
 
-            ctx.timer_service().register_event_time_timer(
-                event_time_ms + _RETENTION_MS
-            )
-            ctx.timer_service().register_event_time_timer(
-                event_time_ms + _IDLE_TTL_MS
-            )
+            ctx.timer_service().register_event_time_timer(event_time_ms + _RETENTION_MS)
+            ctx.timer_service().register_event_time_timer(event_time_ms + _IDLE_TTL_MS)
 
             try:
                 from pipelines.processing.metrics import (
@@ -144,17 +127,13 @@ try:  # pragma: no cover
 
         def on_timer(self, timestamp: int, ctx) -> None:
             cutoff_bucket = (timestamp - _RETENTION_MS) // 60_000
-            stale = [
-                bk for bk in self._buckets.keys() if bk < cutoff_bucket
-            ]
+            stale = [bk for bk in self._buckets.keys() if bk < cutoff_bucket]
             for bk in stale:
                 self._buckets.remove(bk)
             if not list(self._buckets.keys()):
                 self._buckets.clear()
 
-        def process_element_pure(
-            self, event_time_ms: int, amount: Decimal
-        ) -> dict:
+        def process_element_pure(self, event_time_ms: int, amount: Decimal) -> dict:
             """Test-facing method: update in-memory state and return velocity dict."""
             bucket_key = event_time_ms // 60_000
             existing = self._pure_state.get(bucket_key, (0, Decimal("0")))
@@ -174,9 +153,7 @@ except ImportError:
             self._allowed_lateness_ms = allowed_lateness_ms
             self._state: dict[int, tuple[int, Decimal]] = {}
 
-        def process_element_pure(
-            self, event_time_ms: int, amount: Decimal
-        ) -> dict:
+        def process_element_pure(self, event_time_ms: int, amount: Decimal) -> dict:
             """Test-facing method: update state and return velocity dict."""
             bucket_key = event_time_ms // 60_000
             existing = self._state.get(bucket_key, (0, Decimal("0")))
@@ -197,17 +174,13 @@ def _compute_velocity(buckets, current_bucket: int) -> dict:  # pragma: no cover
         for bk, (c, a) in all_buckets.items():
             if bk >= cutoff:
                 count += c
-                total += (
-                    a if isinstance(a, Decimal) else Decimal(str(a))
-                )
+                total += a if isinstance(a, Decimal) else Decimal(str(a))
         velocity[f"vel_count_{label}"] = count
         velocity[f"vel_amount_{label}"] = total
     return velocity
 
 
-def _compute_velocity_from_dict(
-    state: dict[int, tuple[int, Decimal]], current_bucket: int
-) -> dict:
+def _compute_velocity_from_dict(state: dict[int, tuple[int, Decimal]], current_bucket: int) -> dict:
     """Pure-Python version for unit tests."""
     velocity: dict[str, object] = {}
     for mins, label in _WINDOWS:

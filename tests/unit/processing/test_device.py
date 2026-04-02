@@ -1,6 +1,5 @@
 """Unit tests for DeviceProcessFunction (T034)."""
 
-
 from pipelines.processing.operators.device import DeviceProcessFunction
 
 # Reference epoch ms

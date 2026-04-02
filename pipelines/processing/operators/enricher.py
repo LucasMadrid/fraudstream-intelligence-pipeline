@@ -10,9 +10,7 @@ from pipelines.processing.logging_config import set_transaction_id
 
 logger = logging.getLogger(__name__)
 
-_PROCESSOR_VERSION = os.environ.get(
-    "PROCESSOR_VERSION", "002-stream-processor@1.0.0"
-)
+_PROCESSOR_VERSION = os.environ.get("PROCESSOR_VERSION", "002-stream-processor@1.0.0")
 
 
 try:  # pragma: no cover
@@ -29,9 +27,7 @@ try:  # pragma: no cover
             txn, velocity_dict, geo_dict, device_dict = value
             set_transaction_id(getattr(txn, "transaction_id", None))
             enrichment_time = int(time.time() * 1000)
-            enrichment_latency_ms = max(
-                0, enrichment_time - txn.processing_time
-            )
+            enrichment_latency_ms = max(0, enrichment_time - txn.processing_time)
             try:
                 from pipelines.processing.metrics import (
                     enrichment_latency_ms as lat_metric,
@@ -54,8 +50,7 @@ try:  # pragma: no cover
             enrichment_time = int(time.time() * 1000)
             enrichment_latency_ms = max(
                 0,
-                enrichment_time
-                - getattr(txn, "processing_time", enrichment_time),
+                enrichment_time - getattr(txn, "processing_time", enrichment_time),
             )
             return _assemble_record(
                 txn,
@@ -74,14 +69,10 @@ try:  # pragma: no cover
             self._seen_dict: dict[str, int] = {}  # for process_element_pure
 
         def open(self, runtime_context: RuntimeContext) -> None:
-            descriptor = ValueStateDescriptor(
-                "dedup_seen_at", Types.LONG()
-            )
+            descriptor = ValueStateDescriptor("dedup_seen_at", Types.LONG())
             ttl_config = (
                 StateTtlConfig.new_builder(Time.hours(48))
-                .set_update_type(
-                    StateTtlConfig.UpdateType.OnCreateAndWrite
-                )
+                .set_update_type(StateTtlConfig.UpdateType.OnCreateAndWrite)
                 .build()
             )
             descriptor.enable_time_to_live(ttl_config)
@@ -115,14 +106,11 @@ except ImportError:
     class EnrichedRecordAssembler:  # type: ignore[no-redef]  # pragma: no cover
         """Plain-Python stand-in for unit tests."""
 
-        def assemble(
-            self, txn, velocity_dict, geo_dict, device_dict
-        ) -> dict:
+        def assemble(self, txn, velocity_dict, geo_dict, device_dict) -> dict:
             enrichment_time = int(time.time() * 1000)
             enrichment_latency_ms = max(
                 0,
-                enrichment_time
-                - getattr(txn, "processing_time", enrichment_time),
+                enrichment_time - getattr(txn, "processing_time", enrichment_time),
             )
             return _assemble_record(
                 txn,
@@ -139,9 +127,7 @@ except ImportError:
         def __init__(self) -> None:
             self._seen: dict[str, int] = {}
 
-        def process_element_pure(
-            self, txn_id: str, event_time_ms: int
-        ) -> bool:
+        def process_element_pure(self, txn_id: str, event_time_ms: int) -> bool:
             """Returns True if not a duplicate."""
             if txn_id in self._seen:
                 return False

@@ -86,6 +86,7 @@ def test_raw_pan_str_hides_digits():
 
 def test_raw_pan_pickle_blocked():
     import pickle
+
     raw = RawPAN("4111111111111111")
     with pytest.raises(TypeError, match="must not be pickled"):
         pickle.dumps(raw)
@@ -177,6 +178,7 @@ def _generate_luhn_pan(length: int = 16) -> str:
 def test_property_bin6_is_first_six(pan: str):
     bin6, _ = extract_pan_parts(pan)
     import re
+
     digits = re.sub(r"[\s\-]", "", pan)
     assert bin6 == digits[:6]
 
@@ -185,6 +187,7 @@ def test_property_bin6_is_first_six(pan: str):
 def test_property_last4_is_last_four(pan: str):
     _, last4 = extract_pan_parts(pan)
     import re
+
     digits = re.sub(r"[\s\-]", "", pan)
     assert last4 == digits[-4:]
 
@@ -196,6 +199,7 @@ def test_property_display_never_contains_middle(pan: str):
     masked = raw.mask(cfg)
     display = masked.display()
     import re
+
     digits = re.sub(r"[\s\-]", "", pan)
     middle = digits[6:-4]
     assert middle not in display
@@ -216,6 +220,7 @@ def test_property_garbage_input_raises(garbage: str):
 def test_property_truncate_ipv4_ends_in_zero(a: int, b: int, c: int, d: int):
     ip = f"{a}.{b}.{c}.{d}"
     import ipaddress
+
     addr = ipaddress.ip_address(ip)
     assume(not addr.is_multicast)
     cfg = MaskingConfig()

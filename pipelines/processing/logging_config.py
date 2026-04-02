@@ -3,6 +3,7 @@
 Every log record emits at minimum:
   transaction_id, component, timestamp (ISO-8601), level, message
 """
+
 from __future__ import annotations
 
 import datetime

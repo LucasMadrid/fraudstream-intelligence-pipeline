@@ -55,6 +55,7 @@ def test_no_pii_in_raw_bytes(kafka_bootstrap: str):
 
     from pipelines.ingestion.api.producer import TransactionEventBuilder
     from pipelines.ingestion.shared.pii_masker import MaskingConfig
+
     admin = AdminClient({"bootstrap.servers": kafka_bootstrap})
     admin.create_topics([NewTopic("txn.api.test.pii", num_partitions=1, replication_factor=1)])
     time.sleep(1)
@@ -75,18 +76,19 @@ def test_no_pii_in_raw_bytes(kafka_bootstrap: str):
         payload = _valid_payload(pan=pan, ip=ip)
         event = builder.build(payload)
         # Serialize to JSON (simplified — real test would use Avro)
-        value = json.dumps({
-            k: v.hex() if isinstance(v, bytes) else v
-            for k, v in event.items()
-        }).encode()
+        value = json.dumps(
+            {k: v.hex() if isinstance(v, bytes) else v for k, v in event.items()}
+        ).encode()
         producer.produce("txn.api.test.pii", value=value)
     producer.flush()
 
-    consumer = Consumer({
-        "bootstrap.servers": kafka_bootstrap,
-        "group.id": "pii-test",
-        "auto.offset.reset": "earliest",
-    })
+    consumer = Consumer(
+        {
+            "bootstrap.servers": kafka_bootstrap,
+            "group.id": "pii-test",
+            "auto.offset.reset": "earliest",
+        }
+    )
     consumer.subscribe(["txn.api.test.pii"])
 
     raw_bytes_list = []
@@ -127,6 +129,7 @@ def test_idempotent_no_duplicate_on_retry(kafka_bootstrap: str):
 
     from pipelines.ingestion.api.producer import TransactionEventBuilder
     from pipelines.ingestion.shared.pii_masker import MaskingConfig
+
     admin = AdminClient({"bootstrap.servers": kafka_bootstrap})
     admin.create_topics([NewTopic("txn.api.test.idem", num_partitions=1, replication_factor=1)])
     time.sleep(1)
@@ -145,9 +148,7 @@ def test_idempotent_no_duplicate_on_retry(kafka_bootstrap: str):
             return  # Application-layer dedup
         seen.add(p["transaction_id"])
         event = builder.build(p)
-        serialized = {
-            k: v.hex() if isinstance(v, bytes) else v for k, v in event.items()
-        }
+        serialized = {k: v.hex() if isinstance(v, bytes) else v for k, v in event.items()}
         producer.produce(
             "txn.api.test.idem",
             key=txn_id,
@@ -159,11 +160,13 @@ def test_idempotent_no_duplicate_on_retry(kafka_bootstrap: str):
     _dedup_produce(payload)
     _dedup_produce(payload)
 
-    consumer = Consumer({
-        "bootstrap.servers": kafka_bootstrap,
-        "group.id": "idem-test",
-        "auto.offset.reset": "earliest",
-    })
+    consumer = Consumer(
+        {
+            "bootstrap.servers": kafka_bootstrap,
+            "group.id": "idem-test",
+            "auto.offset.reset": "earliest",
+        }
+    )
     consumer.subscribe(["txn.api.test.idem"])
 
     messages = []
@@ -187,9 +190,11 @@ def test_dlq_receives_masking_error(kafka_bootstrap: str):
     from pipelines.ingestion.shared.dlq_producer import DLQProducer
 
     admin = AdminClient({"bootstrap.servers": kafka_bootstrap})
-    admin.create_topics([
-        NewTopic("txn.api.dlq", num_partitions=1, replication_factor=1),
-    ])
+    admin.create_topics(
+        [
+            NewTopic("txn.api.dlq", num_partitions=1, replication_factor=1),
+        ]
+    )
     time.sleep(1)
 
     dlq = DLQProducer(bootstrap_servers=kafka_bootstrap)
@@ -202,11 +207,13 @@ def test_dlq_receives_masking_error(kafka_bootstrap: str):
     )
     dlq.flush()
 
-    consumer = Consumer({
-        "bootstrap.servers": kafka_bootstrap,
-        "group.id": "dlq-test",
-        "auto.offset.reset": "earliest",
-    })
+    consumer = Consumer(
+        {
+            "bootstrap.servers": kafka_bootstrap,
+            "group.id": "dlq-test",
+            "auto.offset.reset": "earliest",
+        }
+    )
     consumer.subscribe(["txn.api.dlq"])
 
     msg = None

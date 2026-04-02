@@ -40,8 +40,7 @@ def _build_raw_payload(account_id: str, seq: int) -> bytes:
     # Placeholder — in a real run, use fastavro + live schema ID from registry
     return (
         b"\x00\x00\x00\x00\x01"  # magic + schema_id=1
-        + f'{{"transaction_id":"{uuid.uuid4()}","account_id":"{account_id}",'
-        f'"seq":{seq}}}'.encode()
+        + f'{{"transaction_id":"{uuid.uuid4()}","account_id":"{account_id}","seq":{seq}}}'.encode()
     )
 
 
@@ -60,8 +59,7 @@ def test_5000_tps_throughput():
     metadata = admin.list_topics(timeout=5)
     if _INPUT_TOPIC not in metadata.topics or _OUTPUT_TOPIC not in metadata.topics:
         pytest.skip(
-            f"Topics {_INPUT_TOPIC} or {_OUTPUT_TOPIC} not found. "
-            "Run: bash infra/kafka/topics.sh"
+            f"Topics {_INPUT_TOPIC} or {_OUTPUT_TOPIC} not found. Run: bash infra/kafka/topics.sh"
         )
 
     producer = Producer({"bootstrap.servers": _BROKER})

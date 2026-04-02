@@ -1,4 +1,5 @@
 """DLQ Kafka sink — routes unprocessable events to txn.processing.dlq."""
+
 from __future__ import annotations
 
 import io

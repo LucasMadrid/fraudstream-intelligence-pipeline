@@ -22,6 +22,7 @@ pytest.importorskip("pyflink", reason="pyflink not installed")
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_txn_payload(
     *,
     transaction_id: str | None = None,
@@ -53,6 +54,7 @@ def _make_txn_payload(
 # ---------------------------------------------------------------------------
 # User Story 1 — single transaction enrichment (T014)
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.integration
 class TestSingleTransactionEnrichment:
@@ -94,6 +96,7 @@ class TestSingleTransactionEnrichment:
 # User Story 3 — fault recovery (T028)
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.integration
 class TestFaultRecovery:
     """US3: Job survives TaskManager restart; no state loss, no duplicates."""
@@ -118,6 +121,7 @@ class TestFaultRecovery:
 # ---------------------------------------------------------------------------
 # Polish — latency assertion (T041)
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.integration
 @pytest.mark.slow

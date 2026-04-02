@@ -29,10 +29,21 @@ def test_txn_api_required_fields_present():
     schema = _load("txn_api_v1.avsc")
     field_names = {f["name"] for f in schema["fields"]}
     required = {
-        "transaction_id", "account_id", "merchant_id", "amount",
-        "currency", "event_time", "processing_time", "channel",
-        "card_bin", "card_last4", "caller_ip_subnet",
-        "api_key_id", "oauth_scope", "masking_lib_version", "schema_version",
+        "transaction_id",
+        "account_id",
+        "merchant_id",
+        "amount",
+        "currency",
+        "event_time",
+        "processing_time",
+        "channel",
+        "card_bin",
+        "card_last4",
+        "caller_ip_subnet",
+        "api_key_id",
+        "oauth_scope",
+        "masking_lib_version",
+        "schema_version",
     }
     assert required <= field_names, f"Missing fields: {required - field_names}"
 

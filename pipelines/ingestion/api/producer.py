@@ -224,9 +224,7 @@ class ProducerService:
         librdkafka_cfg["value.serializer"] = self._serializer
         self._producer = SerializingProducer(librdkafka_cfg)
 
-        self._dlq_producer = DLQProducer(
-            bootstrap_servers=self._config.bootstrap_servers
-        )
+        self._dlq_producer = DLQProducer(bootstrap_servers=self._config.bootstrap_servers)
 
         start_metrics_server(self._config.prometheus_port)
         init_tracer()
@@ -365,9 +363,9 @@ def _handle_pre_serialise_error(
     span.add_event("dlq.routed", attributes={"error_type": error_type})
 
     # Sanitise payload before writing to DLQ if masking was not applied
-    safe_payload = json.dumps({
-        k: v for k, v in raw_payload.items() if k not in ("card_number", "caller_ip")
-    })
+    safe_payload = json.dumps(
+        {k: v for k, v in raw_payload.items() if k not in ("card_number", "caller_ip")}
+    )
 
     if dlq_producer:
         try:
@@ -439,11 +437,14 @@ class _RequestHandler(BaseHTTPRequestHandler):
 
         try:
             result = self.producer_service.publish(payload)
-            self._respond(200, {
-                "transaction_id": result.transaction_id,
-                "status": result.status,
-                "latency_ms": result.latency_ms,
-            })
+            self._respond(
+                200,
+                {
+                    "transaction_id": result.transaction_id,
+                    "status": result.status,
+                    "latency_ms": result.latency_ms,
+                },
+            )
         except InvalidPANError as exc:
             self._respond(400, {"error": "InvalidPANError", "detail": str(exc)})
         except MaskingError as exc:

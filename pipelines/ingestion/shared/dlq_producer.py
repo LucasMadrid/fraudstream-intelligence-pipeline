@@ -21,12 +21,14 @@ class DLQProducer:
     """
 
     def __init__(self, bootstrap_servers: str) -> None:
-        self._producer = Producer({
-            "bootstrap.servers": bootstrap_servers,
-            "acks": 1,
-            "linger.ms": 5,
-            "client.id": f"dlq-producer-{socket.gethostname()}",
-        })
+        self._producer = Producer(
+            {
+                "bootstrap.servers": bootstrap_servers,
+                "acks": 1,
+                "linger.ms": 5,
+                "client.id": f"dlq-producer-{socket.gethostname()}",
+            }
+        )
 
     def send_to_dlq(
         self,

@@ -17,6 +17,7 @@ from pipelines.processing.operators.velocity import (
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_op():
     """Return a fresh pure-Python VelocityProcessFunction."""
     return VelocityProcessFunction()
@@ -34,6 +35,7 @@ _T0 = 1_767_225_600_000
 # ---------------------------------------------------------------------------
 # T021: Window boundary correctness
 # ---------------------------------------------------------------------------
+
 
 class TestColdStart:
     def test_first_transaction_all_counts_are_one(self):
@@ -125,12 +127,11 @@ class TestMonotoneNesting:
 # T022: Hypothesis property-based tests
 # ---------------------------------------------------------------------------
 
+
 @st.composite
 def velocity_event_strategy(draw):
     """Generate a single (offset_from_T0_ms, amount) pair."""
-    offset_ms = draw(
-        st.integers(min_value=-(24 * 60 * 60 * 1000), max_value=0)
-    )
+    offset_ms = draw(st.integers(min_value=-(24 * 60 * 60 * 1000), max_value=0))
     amount_cents = draw(st.integers(min_value=1, max_value=1_000_000))
     amount = Decimal(amount_cents) / 100
     return (offset_ms, amount)

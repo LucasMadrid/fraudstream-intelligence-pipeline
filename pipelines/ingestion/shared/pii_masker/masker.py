@@ -37,6 +37,7 @@ class RawPAN:
     def __init__(self, pan: str) -> None:
         # Normalise immediately — strips separators but keeps validation lazy
         import re
+
         self._digits: str = re.sub(r"[\s\-]", "", pan)
 
     def __repr__(self) -> str:
