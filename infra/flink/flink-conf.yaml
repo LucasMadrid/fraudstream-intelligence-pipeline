@@ -1,0 +1,66 @@
+# Flink configuration for the stream processor (002-flink-stream-processor)
+# Applied to both JobManager and TaskManager containers.
+
+# ── Python function execution ──────────────────────────────────────────────
+# Arrow batching brings per-record amortized overhead to ~10-50 µs
+# (vs 0.5-2 ms with pickle + bundle.size=1).
+# bundle.time is the max wait (ms) before a partial bundle is flushed —
+# this caps tail latency for sparse streams.
+python.fn-execution.bundle.size: 1000
+python.fn-execution.bundle.time: 15
+python.fn-execution.arrow.batch.size: 1000
+
+# ── State backend ──────────────────────────────────────────────────────────
+state.backend: rocksdb
+state.backend.incremental: true
+
+# Retain at least 3 checkpoints to maintain incremental SST chain.
+# Never delete an intermediate checkpoint without retaining the full chain.
+state.checkpoints.num-retained: 3
+
+# RocksDB managed memory — spills to disk when heap is full.
+state.backend.rocksdb.memory.managed: true
+state.backend.rocksdb.memory.fixed-per-slot: 512mb
+
+# 4 threads for parallel checkpoint SST file transfer to S3/MinIO.
+state.backend.rocksdb.checkpoint.transfer.thread.num: 4
+
+# Store event-time timers in RocksDB (not on heap) — required for
+# large-scale timer sets (velocity eviction timers per account).
+state.backend.rocksdb.timer-service.factory: ROCKSDB
+
+# ── Checkpoint storage ─────────────────────────────────────────────────────
+state.checkpoints.dir: s3://flink-checkpoints/002-stream-processor
+
+# ── Checkpointing ─────────────────────────────────────────────────────────
+# Interval: 60 s — matches FR-008 requirement.
+# Recovery window sizing: interval (60 s) + checkpoint duration budget (<10 s per SC-003)
+# ensures recovery completes within the SC-003 60-second window even when the last
+# successful checkpoint was taken at the start of the interval.
+execution.checkpointing.interval: 60000
+
+# ── Memory ────────────────────────────────────────────────────────────────
+jobmanager.memory.process.size: 1g
+taskmanager.memory.process.size: 4g
+
+# RocksDB uses off-heap managed memory that bypasses the JVM heap.
+# managed.fraction=0.4 allocates 40% of process memory (~1.6 GB on a 4g TaskManager)
+# to managed memory for RocksDB SST buffers and block cache.
+# This keeps RocksDB within fixed-per-slot=512mb budget per slot (2 slots * 512mb = 1gb)
+# and leaves headroom for JVM heap + network buffers + metaspace.
+taskmanager.memory.managed.fraction: 0.4
+
+# ── Parallelism ───────────────────────────────────────────────────────────
+# 2 task slots per TaskManager (matches docker-compose taskmanager.numberOfTaskSlots).
+# At 5,000 TPS/node (SC-002) and Arrow bundle overhead ~10-50 µs amortised,
+# 2 parallel subtasks provide sufficient headroom for the dev/staging load profile.
+# Production parallelism should be set per-job via the JobManager REST API
+# based on measured partition count and TPS.
+parallelism.default: 2
+
+# ── Cluster connectivity ───────────────────────────────────────────────────
+jobmanager.rpc.address: flink-jobmanager
+rest.port: 8081
+
+# ── High availability (local dev — no HA) ─────────────────────────────────
+high-availability: NONE

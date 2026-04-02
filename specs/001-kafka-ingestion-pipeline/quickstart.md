@@ -43,7 +43,7 @@ This creates:
 Verify:
 
 ```bash
-docker exec broker kafka-topics.sh --bootstrap-server localhost:9092 --list
+docker exec broker kafka-topics --bootstrap-server localhost:9092 --list
 # txn.api
 # txn.api.dlq
 ```
@@ -257,4 +257,4 @@ docker exec schema-registry \
 → Verify `linger.ms=1` and `queue.buffering.max.ms=1` are both set. Check broker co-location (cross-AZ adds 5–15ms). Check GC pauses in Python process.
 
 **DLQ not receiving events**
-→ Confirm `txn.api.dlq` topic exists (`kafka-topics.sh --list`). Check DLQ producer config (`acks=1`, not `all`) to avoid DLQ writes blocking on broker issues.
+→ Confirm `txn.api.dlq` topic exists (`kafka-topics --list`). Check DLQ producer config (`acks=1`, not `all`) to avoid DLQ writes blocking on broker issues.

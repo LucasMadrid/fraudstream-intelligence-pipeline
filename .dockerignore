@@ -1,0 +1,42 @@
+# Python bytecode
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+
+# Virtual environments
+venv/
+.venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# Testing / coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Git
+.git/
+
+# CI/CD config (not needed inside image)
+.github/
+
+# Dev docs
+docs/
+*.md
+
+# Secrets
+.env
+.env.*
+
+# GeoIP DB — volume-mounted at runtime, never baked in
+*.mmdb
+infra/geoip/
+
+# Specs (requirements docs, not runtime code)
+specs/

@@ -1,0 +1,234 @@
+{
+  "type": "record",
+  "name": "EnrichedTransactionEvent",
+  "namespace": "com.fraudstream.processing.enrichment",
+  "doc": "Enriched transaction event published to txn.enriched. Contains all original RawTransaction fields plus velocity aggregates (per-account rolling windows), geolocation context (from IP subnet), and device fingerprint features. Consumed by the scoring engine. PII fields remain masked as per upstream producer — this record never contains full PAN or full IP.",
+  "fields": [
+    {
+      "name": "transaction_id",
+      "type": "string",
+      "doc": "UUID v4. Forwarded unchanged from txn.api. Partition key for downstream deduplication. RECONCILIATION CONTRACT: every input event from txn.api appears on exactly one of txn.enriched (this field non-null) or txn.processing.dlq (transaction_id may be null if Avro deserialization failed). Join on this field across topics to confirm complete processing. nullable: false."
+    },
+    {
+      "name": "account_id",
+      "type": "string",
+      "doc": "Account identifier. Forwarded unchanged. Kafka partition key for co-partitioned consumers. nullable: false."
+    },
+    {
+      "name": "merchant_id",
+      "type": "string",
+      "doc": "Merchant identifier. Forwarded unchanged. nullable: false."
+    },
+    {
+      "name": "amount",
+      "type": {
+        "type": "bytes",
+        "logicalType": "decimal",
+        "precision": 18,
+        "scale": 4
+      },
+      "doc": "Transaction amount. Two's-complement big-endian decimal. Forwarded unchanged. nullable: false."
+    },
+    {
+      "name": "currency",
+      "type": "string",
+      "doc": "ISO-4217 currency code. Forwarded unchanged. nullable: false."
+    },
+    {
+      "name": "event_time",
+      "type": {
+        "type": "long",
+        "logicalType": "timestamp-millis"
+      },
+      "doc": "Original event timestamp from the API producer. Used as the event-time anchor for all window computations. nullable: false."
+    },
+    {
+      "name": "processing_time",
+      "type": {
+        "type": "long",
+        "logicalType": "timestamp-millis"
+      },
+      "doc": "Timestamp set by the ingestion producer at receipt. Forwarded unchanged. nullable: false."
+    },
+    {
+      "name": "channel",
+      "type": "string",
+      "doc": "Transaction channel. Forwarded unchanged. nullable: false."
+    },
+    {
+      "name": "card_bin",
+      "type": "string",
+      "doc": "First 6 digits of PAN (BIN). Forwarded unchanged. PCI-DSS IN SCOPE — consumers of txn.enriched must hold PCI-DSS authorisation. nullable: false."
+    },
+    {
+      "name": "card_last4",
+      "type": "string",
+      "doc": "Last 4 digits of PAN. Forwarded unchanged. PCI-DSS IN SCOPE — consumers of txn.enriched must hold PCI-DSS authorisation. nullable: false."
+    },
+    {
+      "name": "caller_ip_subnet",
+      "type": "string",
+      "doc": "Caller IP /24 subnet. Forwarded unchanged — geolocation derived from this field but the raw subnet is preserved for audit. nullable: false."
+    },
+    {
+      "name": "api_key_id",
+      "type": "string",
+      "doc": "API key identifier. Forwarded unchanged. Used as device proxy identifier (device_id v1 — dedicated field deferred to schema v2). SENSITIVITY: api_key_id is stable across sessions; its presence enables cross-account device tracking patterns even without raw PII. Treat as a sensitive linkage identifier. nullable: false."
+    },
+    {
+      "name": "oauth_scope",
+      "type": "string",
+      "doc": "OAuth scope string. Forwarded unchanged. nullable: false."
+    },
+    {
+      "name": "geo_lat",
+      "type": ["null", "float"],
+      "default": null,
+      "doc": "Geographic latitude from the raw API request — forwarded unchanged from txn.api. NOT derived from GeoLite2 (GeoLite2 populates geo_country/geo_city/geo_network_class/geo_confidence). Null if absent in the upstream record. nullable: true."
+    },
+    {
+      "name": "geo_lon",
+      "type": ["null", "float"],
+      "default": null,
+      "doc": "Geographic longitude from the raw API request — forwarded unchanged from txn.api. NOT derived from GeoLite2. Null if absent in the upstream record. nullable: true."
+    },
+    {
+      "name": "masking_lib_version",
+      "type": "string",
+      "doc": "PII masking library version from upstream producer. Forwarded unchanged from txn.api. Format: semver string (e.g. '1.2.3'). nullable: false."
+    },
+    {
+      "name": "vel_count_1m",
+      "type": "int",
+      "doc": "Transaction count for this account in the last 60 seconds (event time). Includes the current transaction. Min value: 1. nullable: false."
+    },
+    {
+      "name": "vel_amount_1m",
+      "type": {
+        "type": "bytes",
+        "logicalType": "decimal",
+        "precision": 18,
+        "scale": 4
+      },
+      "doc": "Total transaction amount for this account in the last 60 seconds (event time). Includes the current transaction. Aggregated in the native currency of each transaction — NO cross-currency normalisation (TD-001: deferred to v2). Consumers MUST filter by the currency field before comparing amounts across accounts. nullable: false."
+    },
+    {
+      "name": "vel_count_5m",
+      "type": "int",
+      "doc": "Transaction count for this account in the last 5 minutes (event time). nullable: false."
+    },
+    {
+      "name": "vel_amount_5m",
+      "type": {
+        "type": "bytes",
+        "logicalType": "decimal",
+        "precision": 18,
+        "scale": 4
+      },
+      "doc": "Total transaction amount for this account in the last 5 minutes (event time). Aggregated in native currency — see vel_amount_1m for multi-currency limitation (TD-001). nullable: false."
+    },
+    {
+      "name": "vel_count_1h",
+      "type": "int",
+      "doc": "Transaction count for this account in the last 1 hour (event time). nullable: false."
+    },
+    {
+      "name": "vel_amount_1h",
+      "type": {
+        "type": "bytes",
+        "logicalType": "decimal",
+        "precision": 18,
+        "scale": 4
+      },
+      "doc": "Total transaction amount for this account in the last 1 hour (event time). Aggregated in native currency — see vel_amount_1m for multi-currency limitation (TD-001). nullable: false."
+    },
+    {
+      "name": "vel_count_24h",
+      "type": "int",
+      "doc": "Transaction count for this account in the last 24 hours (event time). nullable: false."
+    },
+    {
+      "name": "vel_amount_24h",
+      "type": {
+        "type": "bytes",
+        "logicalType": "decimal",
+        "precision": 18,
+        "scale": 4
+      },
+      "doc": "Total transaction amount for this account in the last 24 hours (event time). Aggregated in native currency — see vel_amount_1m for multi-currency limitation (TD-001). nullable: false."
+    },
+    {
+      "name": "geo_country",
+      "type": ["null", "string"],
+      "default": null,
+      "doc": "ISO 3166-1 alpha-2 country code derived from caller_ip_subnet via GeoLite2 (e.g. 'US'). Null if subnet unresolvable. nullable: true — unresolvable subnet is not an error."
+    },
+    {
+      "name": "geo_city",
+      "type": ["null", "string"],
+      "default": null,
+      "doc": "City name derived from caller_ip_subnet (e.g. 'New York'). Null if city-level precision unavailable. nullable: true."
+    },
+    {
+      "name": "geo_network_class",
+      "type": [
+        "null",
+        {
+          "type": "enum",
+          "name": "NetworkClass",
+          "symbols": ["RESIDENTIAL", "BUSINESS", "HOSTING", "MOBILE", "UNKNOWN"]
+        }
+      ],
+      "default": null,
+      "doc": "Network type classification derived from GeoLite2. Closed enum — consumers can switch on these values without fallback guards. Null if GeoLite2 lookup failed. nullable: true."
+    },
+    {
+      "name": "geo_confidence",
+      "type": ["null", "float"],
+      "default": null,
+      "doc": "Geolocation confidence score in [0.0, 1.0]. Derived from MaxMind accuracy radius. 0.0 = failed lookup, 1.0 = exact match. Null if lookup not attempted. nullable: true."
+    },
+    {
+      "name": "device_first_seen",
+      "type": ["null", {"type": "long", "logicalType": "timestamp-millis"}],
+      "default": null,
+      "doc": "Event time of the first transaction observed from this device (api_key_id). Set on first encounter; never updated. Null if api_key_id absent. nullable: true."
+    },
+    {
+      "name": "device_txn_count",
+      "type": ["null", "int"],
+      "default": null,
+      "doc": "Lifetime transaction count for this device (api_key_id). Includes the current transaction. Null if api_key_id absent. nullable: true."
+    },
+    {
+      "name": "device_known_fraud",
+      "type": ["null", "boolean"],
+      "default": null,
+      "doc": "True if any prior transaction from this device was labelled fraudulent. NOT YET WIRED IN V1 — always null. Consumers MUST treat null as 'not evaluated' (TD-002). DO NOT coerce null to false: null does not mean the device is known-clean. Null if api_key_id absent or in v1. nullable: true."
+    },
+    {
+      "name": "enrichment_time",
+      "type": {
+        "type": "long",
+        "logicalType": "timestamp-millis"
+      },
+      "doc": "Processing-time timestamp when enrichment completed (set by the Flink processor). Used for enrichment latency calculation. nullable: false."
+    },
+    {
+      "name": "enrichment_latency_ms",
+      "type": "int",
+      "doc": "Difference in milliseconds between enrichment_time and processing_time. MEASUREMENT BOUNDARY: processing_time is set by the ingestion producer (feature 001) at API receipt — NOT at Flink consumer receipt. This field therefore measures total pipeline latency from ingestion to enrichment completion (includes Kafka queuing time). It is NOT pure Flink-internal latency. Use enrichment_time minus Kafka consumer receipt timestamp for Flink-internal latency. nullable: false."
+    },
+    {
+      "name": "processor_version",
+      "type": "string",
+      "doc": "Version string of the Flink processor job that produced this record. Format: '{feature-branch}@{semver}' (e.g. '002-stream-processor@1.0.0'). Populated at job startup from the PROCESSOR_VERSION environment variable. Enables version-specific debugging and rollback correlation. nullable: false."
+    },
+    {
+      "name": "schema_version",
+      "type": "string",
+      "default": "1",
+      "doc": "Schema version identifier. Incremented when a breaking change requires a new topic (txn.enriched.v2). nullable: false."
+    }
+  ]
+}

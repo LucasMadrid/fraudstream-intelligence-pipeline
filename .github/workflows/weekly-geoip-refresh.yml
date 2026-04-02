@@ -1,0 +1,163 @@
+name: Weekly GeoIP Database Refresh
+
+on:
+  schedule:
+    # Every Monday at 02:00 UTC
+    - cron: '0 2 * * 1'
+  workflow_dispatch:  # Allow manual trigger
+
+jobs:
+  refresh-geoip:
+    name: Download and Update GeoLite2 Database
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate MAXMIND_LICENCE_KEY secret
+        # Ensure the secret is configured before attempting download
+        run: |
+          if [ -z "${{ secrets.MAXMIND_LICENCE_KEY }}" ]; then
+            echo "ERROR: MAXMIND_LICENCE_KEY secret is not configured"
+            exit 1
+          fi
+          echo "Secret is configured (length: ${#MAXMIND_LICENCE_KEY})"
+        env:
+          MAXMIND_LICENCE_KEY: ${{ secrets.MAXMIND_LICENCE_KEY }}
+
+      - name: Create geoip directory
+        run: mkdir -p infra/geoip
+
+      - name: Download GeoLite2-City database
+        env:
+          MAXMIND_LICENCE_KEY: ${{ secrets.MAXMIND_LICENCE_KEY }}
+        run: |
+          set -e
+
+          # Download the GeoLite2-City tarball from MaxMind
+          # Note: The licence key is NOT echoed to logs (using env var directly)
+          DOWNLOAD_URL="https://download.maxmind.com/app/geoip_download?edition_id=GeoLite2-City&license_key=${MAXMIND_LICENCE_KEY}&suffix=tar.gz"
+
+          echo "Downloading GeoLite2-City database..."
+          curl -f -s -L \
+            -o /tmp/geolite2-city.tar.gz \
+            "${DOWNLOAD_URL}"
+
+          if [ ! -f /tmp/geolite2-city.tar.gz ]; then
+            echo "ERROR: Download failed or file not created"
+            exit 1
+          fi
+
+          # Verify file is not empty
+          file_size=$(stat -f%z /tmp/geolite2-city.tar.gz 2>/dev/null || stat -c%s /tmp/geolite2-city.tar.gz)
+          if [ "$file_size" -lt 10000000 ]; then
+            echo "ERROR: Downloaded file is too small ($file_size bytes). Possible auth failure or corruption."
+            exit 1
+          fi
+
+          echo "File downloaded successfully (size: $file_size bytes)"
+
+      - name: Validate and extract database
+        run: |
+          set -e
+
+          # Extract the tarball
+          tar -tzf /tmp/geolite2-city.tar.gz > /dev/null 2>&1 || {
+            echo "ERROR: Tarball is corrupted or invalid"
+            exit 1
+          }
+
+          # Extract to temp location
+          mkdir -p /tmp/geolite2-extracted
+          tar -xzf /tmp/geolite2-city.tar.gz -C /tmp/geolite2-extracted
+
+          # Find the .mmdb file (MaxMind databases are nested in version-dated directories)
+          MMDB_FILE=$(find /tmp/geolite2-extracted -name "GeoLite2-City.mmdb" -type f)
+
+          if [ -z "$MMDB_FILE" ]; then
+            echo "ERROR: GeoLite2-City.mmdb not found in archive"
+            echo "Archive contents:"
+            find /tmp/geolite2-extracted -type f
+            exit 1
+          fi
+
+          echo "Found database: $MMDB_FILE"
+
+          # Verify it's a valid MaxMind DB binary (should start with 0xabcdef)
+          file_magic=$(xxd -p -l 2 "$MMDB_FILE")
+          if [ "$file_magic" != "abcd" ]; then
+            echo "ERROR: File does not appear to be a valid MaxMind DB (magic bytes: $file_magic)"
+            exit 1
+          fi
+
+          # Verify non-zero file size
+          mmdb_size=$(stat -f%z "$MMDB_FILE" 2>/dev/null || stat -c%s "$MMDB_FILE")
+          if [ "$mmdb_size" -eq 0 ]; then
+            echo "ERROR: Extracted .mmdb file is empty"
+            exit 1
+          fi
+
+          echo "Database validation passed (size: $mmdb_size bytes)"
+
+          # Copy to repository
+          cp "$MMDB_FILE" infra/geoip/GeoLite2-City.mmdb
+          echo "Database copied to infra/geoip/GeoLite2-City.mmdb"
+
+          # Cleanup
+          rm -rf /tmp/geolite2-extracted /tmp/geolite2-city.tar.gz
+
+      - name: Check for changes
+        id: check-changes
+        run: |
+          if git diff --quiet infra/geoip/GeoLite2-City.mmdb; then
+            echo "changed=false" >> $GITHUB_OUTPUT
+            echo "No changes detected in GeoLite2 database"
+          else
+            echo "changed=true" >> $GITHUB_OUTPUT
+            echo "GeoLite2 database has been updated"
+          fi
+
+      - name: Commit and push update
+        if: steps.check-changes.outputs.changed == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # Add the updated database file
+          git add infra/geoip/GeoLite2-City.mmdb
+
+          # Create commit with date stamp
+          COMMIT_DATE=$(date -u +'%Y-%m-%d')
+          git commit -m "chore: update GeoLite2-City.mmdb database ($COMMIT_DATE)
+
+MaxMind GeoLite2-City database automatically updated via scheduled CI job.
+Downloaded at: $(date -u +'%Y-%m-%d %H:%M:%S UTC')
+
+Auto-committed by GitHub Actions."
+
+          # Push to main branch
+          git push origin HEAD:main
+
+          echo ""
+          echo "## GeoIP Database Update"
+          echo "✅ Database updated and committed to main branch"
+          echo "- File: infra/geoip/GeoLite2-City.mmdb"
+          echo "- Timestamp: $(date -u)"
+
+      - name: No changes notification
+        if: steps.check-changes.outputs.changed == 'false'
+        run: |
+          echo "## GeoIP Database Check"
+          echo "ℹ️ No updates available for GeoLite2-City.mmdb"
+          echo "Current version is up-to-date."
+
+      - name: Send Slack notification on failure
+        if: failure()
+        uses: 8398a7/action-slack@v3
+        with:
+          status: ${{ job.status }}
+          text: 'GeoIP database refresh workflow failed'
+          webhook_url: ${{ secrets.SLACK_WEBHOOK_URL }}
+          fields: repo,message,commit,author
+        continue-on-error: true

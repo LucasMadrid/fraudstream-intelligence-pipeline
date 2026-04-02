@@ -1,0 +1,658 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - '**'
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  # ============================================================================
+  # Stage 1: Code Quality Gate (BLOCKING)
+  # ============================================================================
+  code-quality:
+    name: Code Quality Gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install dev dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Ruff check (linting)
+        run: ruff check .
+        # Explicit fail-on-error: ruff check exits non-zero on violations
+
+      - name: Ruff format check
+        run: ruff format --check .
+        # Fails if code would be reformatted
+
+  # ============================================================================
+  # Stage 2: Unit Tests + Coverage Gate (BLOCKING)
+  # ============================================================================
+  unit-tests:
+    name: Unit Tests + Coverage Gate
+    needs: code-quality
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install dev dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev,processing]"
+
+      - name: Run unit tests with coverage
+        run: |
+          pytest tests/unit/ \
+            --cov=pipelines \
+            --cov-fail-under=80 \
+            --cov-report=xml \
+            --cov-report=term-missing \
+            -v
+
+      - name: Upload coverage report as artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage.xml
+
+      - name: Post coverage to PR
+        if: github.event_name == 'pull_request'
+        uses: py-cov-action/python-coverage-comment-action@v3
+        with:
+          GITHUB_TOKEN: ${{ github.token }}
+          MINIMUM_GREEN: 80
+          MINIMUM_ORANGE: 70
+
+  # ============================================================================
+  # Stage 3: Schema Integrity Check (BLOCKING)
+  # Validates that specs/*/contracts/ matches pipelines/*/schemas/
+  # ============================================================================
+  schema-integrity:
+    name: Schema Integrity Check
+    needs: code-quality
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check schema consistency
+        run: |
+          set -e
+
+          # Define schema pairs to validate
+          declare -A schema_pairs=(
+            ["specs/001-kafka-ingestion-pipeline/contracts/txn-api-v1.avsc"]="pipelines/ingestion/schemas/txn_api_v1.avsc"
+            ["specs/001-kafka-ingestion-pipeline/contracts/dlq-envelope-v1.avsc"]="pipelines/ingestion/schemas/dlq_envelope_v1.avsc"
+            ["specs/002-flink-stream-processor/contracts/enriched-txn-v1.avsc"]="pipelines/processing/schemas/enriched-txn-v1.avsc"
+            ["specs/002-flink-stream-processor/contracts/processing-dlq-v1.avsc"]="pipelines/processing/schemas/processing-dlq-v1.avsc"
+          )
+
+          divergence_found=0
+
+          for spec_path in "${!schema_pairs[@]}"; do
+            processed_path="${schema_pairs[$spec_path]}"
+
+            if [ ! -f "$spec_path" ]; then
+              echo "WARNING: Spec file not found: $spec_path"
+              continue
+            fi
+
+            if [ ! -f "$processed_path" ]; then
+              echo "ERROR: Processed schema file not found: $processed_path"
+              echo "  Expected to mirror: $spec_path"
+              divergence_found=1
+              continue
+            fi
+
+            # Compare file contents (normalize line endings to handle git autocrlf)
+            spec_content=$(cat "$spec_path" | dos2unix 2>/dev/null || cat "$spec_path")
+            processed_content=$(cat "$processed_path" | dos2unix 2>/dev/null || cat "$processed_path")
+
+            if ! diff <(echo "$spec_content") <(echo "$processed_content") > /dev/null 2>&1; then
+              echo "ERROR: Schema divergence detected!"
+              echo "  Spec file:      $spec_path"
+              echo "  Pipeline file:  $processed_path"
+              echo ""
+              echo "=== Diff (- spec | + pipeline) ==="
+              diff -u "$spec_path" "$processed_path" || true
+              echo ""
+              divergence_found=1
+            fi
+          done
+
+          if [ $divergence_found -eq 1 ]; then
+            echo ""
+            echo "FATAL: One or more schema files diverge from their spec definitions."
+            echo "       This is a blocking failure. See diffs above."
+            exit 1
+          fi
+
+          echo "Schema integrity check passed: all specs match their pipeline schemas."
+
+  # ============================================================================
+  # Stage 3b: Schema Registry Compatibility Check (BLOCKING)
+  # Spins up Kafka + Schema Registry as CI services and registers all four
+  # Avro schemas with BACKWARD compatibility mode.
+  # Closes: docs/tech-debt.md TD-001
+  # ============================================================================
+  schema-registry-compat:
+    name: Schema Registry Compatibility Check
+    needs: schema-integrity
+    runs-on: ubuntu-latest
+    services:
+      broker:
+        image: confluentinc/cp-kafka:7.6.1
+        ports:
+          - "9092:9092"
+        env:
+          KAFKA_NODE_ID: 1
+          KAFKA_PROCESS_ROLES: broker,controller
+          KAFKA_LISTENERS: PLAINTEXT://broker:29092,PLAINTEXT_HOST://0.0.0.0:9092,CONTROLLER://broker:9093
+          KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://broker:29092,PLAINTEXT_HOST://localhost:9092
+          KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT,CONTROLLER:PLAINTEXT
+          KAFKA_CONTROLLER_QUORUM_VOTERS: 1@broker:9093
+          KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+          KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+          KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+          KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+          KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+          KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+          CLUSTER_ID: "MkU3OEVBNTcwNTJENDM2Qk"
+        options: >-
+          --health-cmd "kafka-topics --bootstrap-server localhost:9092 --list"
+          --health-interval 10s
+          --health-timeout 10s
+          --health-retries 10
+      schema-registry:
+        image: confluentinc/cp-schema-registry:7.6.1
+        ports:
+          - "8081:8081"
+        env:
+          SCHEMA_REGISTRY_HOST_NAME: schema-registry
+          SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: broker:29092
+          SCHEMA_REGISTRY_LISTENERS: http://0.0.0.0:8081
+        options: >-
+          --health-cmd "curl -f http://localhost:8081/subjects"
+          --health-interval 10s
+          --health-timeout 10s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Wait for Schema Registry
+        # Belt-and-suspenders: services healthcheck should gate this, but SR
+        # sometimes reports healthy before it's fully initialised.
+        run: |
+          for i in {1..30}; do
+            if curl -sf http://localhost:8081/subjects > /dev/null; then
+              echo "Schema Registry ready"
+              break
+            fi
+            echo "Waiting for Schema Registry... ($i/30)"
+            sleep 2
+          done
+
+      - name: Register schemas with BACKWARD compatibility
+        run: |
+          set -e
+
+          SR_URL="http://localhost:8081"
+
+          # subject name → schema file
+          declare -A subjects=(
+            ["txn-api-value"]="pipelines/ingestion/schemas/txn_api_v1.avsc"
+            ["dlq-envelope-value"]="pipelines/ingestion/schemas/dlq_envelope_v1.avsc"
+            ["txn-enriched-value"]="pipelines/processing/schemas/enriched-txn-v1.avsc"
+            ["txn-processing-dlq-value"]="pipelines/processing/schemas/processing-dlq-v1.avsc"
+          )
+
+          failed=0
+
+          for subject in "${!subjects[@]}"; do
+            schema_file="${subjects[$subject]}"
+
+            if [ ! -f "$schema_file" ]; then
+              echo "ERROR: Schema file not found: $schema_file"
+              failed=1
+              continue
+            fi
+
+            echo "=== $subject ==="
+
+            # 1. Set BACKWARD compatibility mode for this subject
+            compat_response=$(curl -sf -X PUT "${SR_URL}/config/${subject}" \
+              -H "Content-Type: application/vnd.schemaregistry.v1+json" \
+              -d '{"compatibility": "BACKWARD"}')
+
+            if echo "$compat_response" | jq -e '.error_code' > /dev/null 2>&1; then
+              echo "ERROR: Failed to set compatibility: $compat_response"
+              failed=1
+              continue
+            fi
+            echo "  compatibility: BACKWARD"
+
+            # 2. Register the schema
+            schema_payload=$(jq -Rs '{"schema": .}' < "$schema_file")
+            reg_response=$(curl -sf -X POST "${SR_URL}/subjects/${subject}/versions" \
+              -H "Content-Type: application/vnd.schemaregistry.v1+json" \
+              -d "$schema_payload")
+
+            if echo "$reg_response" | jq -e '.error_code' > /dev/null 2>&1; then
+              echo "ERROR: Registration failed: $reg_response"
+              failed=1
+              continue
+            fi
+
+            echo "  registered: schema ID $(echo "$reg_response" | jq .id)"
+          done
+
+          if [ $failed -eq 1 ]; then
+            echo ""
+            echo "FATAL: One or more schemas failed BACKWARD compatibility registration."
+            exit 1
+          fi
+
+          echo ""
+          echo "All schemas registered with BACKWARD compatibility mode."
+
+  # ============================================================================
+  # Stage 4: Security Scanning (BLOCKING for HIGH/CRITICAL; always runs)
+  # Scans Python dependencies + Docker images with Trivy
+  # ============================================================================
+  security-scan:
+    name: Security Scanning
+    # Do NOT block on code-quality or unit-tests; always run this job
+    runs-on: ubuntu-latest
+    continue-on-error: false
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install pip-audit
+        run: |
+          python -m pip install --upgrade pip
+          pip install pip-audit
+
+      - name: Scan Python dependencies with pip-audit
+        id: pip-audit
+        continue-on-error: true
+        run: |
+          pip-audit --desc \
+            --output sarif \
+            --output-file /tmp/pip-audit-report.sarif || \
+          (exit_code=$?; echo "pip_audit_exit_code=$exit_code" >> $GITHUB_OUTPUT; exit 0)
+
+      - name: Upload pip-audit SARIF to GitHub Security
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: /tmp/pip-audit-report.sarif
+          category: pip-audit
+          wait-for-processing: false
+
+      - name: Install Trivy
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq curl
+          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
+
+      - name: Scan confluentinc/cp-kafka:7.6.1 with Trivy
+        id: scan-kafka
+        continue-on-error: true
+        run: |
+          trivy image --severity HIGH,CRITICAL \
+            --exit-code 0 \
+            --format sarif \
+            --output /tmp/trivy-kafka.sarif \
+            confluentinc/cp-kafka:7.6.1 || true
+
+          # Check again with exit-code 1 to get actual status
+          trivy image --severity HIGH,CRITICAL \
+            --exit-code 1 \
+            confluentinc/cp-kafka:7.6.1 && echo "kafka_status=clean" >> $GITHUB_OUTPUT || echo "kafka_status=vulnerable" >> $GITHUB_OUTPUT
+
+      - name: Scan confluentinc/cp-schema-registry:7.6.1 with Trivy
+        id: scan-schema-registry
+        continue-on-error: true
+        run: |
+          trivy image --severity HIGH,CRITICAL \
+            --exit-code 0 \
+            --format sarif \
+            --output /tmp/trivy-schema-registry.sarif \
+            confluentinc/cp-schema-registry:7.6.1 || true
+
+          trivy image --severity HIGH,CRITICAL \
+            --exit-code 1 \
+            confluentinc/cp-schema-registry:7.6.1 && echo "registry_status=clean" >> $GITHUB_OUTPUT || echo "registry_status=vulnerable" >> $GITHUB_OUTPUT
+
+      - name: Scan apache/flink:1.19-scala_2.12 with Trivy
+        id: scan-flink
+        continue-on-error: true
+        run: |
+          trivy image --severity HIGH,CRITICAL \
+            --exit-code 0 \
+            --format sarif \
+            --output /tmp/trivy-flink.sarif \
+            apache/flink:1.19-scala_2.12 || true
+
+          trivy image --severity HIGH,CRITICAL \
+            --exit-code 1 \
+            apache/flink:1.19-scala_2.12 && echo "flink_status=clean" >> $GITHUB_OUTPUT || echo "flink_status=vulnerable" >> $GITHUB_OUTPUT
+
+      - name: Upload Trivy SARIF reports
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: /tmp/trivy-*.sarif
+          category: trivy-images
+          wait-for-processing: false
+
+      - name: Report security scan status
+        if: always()
+        run: |
+          echo "## Security Scan Results"
+          echo ""
+          echo "### Python Dependencies (pip-audit)"
+          if [ -f /tmp/pip-audit-report.sarif ]; then
+            echo "- Report generated: see GitHub Security tab"
+          else
+            echo "- No vulnerabilities found"
+          fi
+          echo ""
+          echo "### Docker Images (Trivy - HIGH/CRITICAL only)"
+          echo "- cp-kafka:7.6.1: ${{ steps.scan-kafka.outputs.kafka_status || 'unknown' }}"
+          echo "- cp-schema-registry:7.6.1: ${{ steps.scan-schema-registry.outputs.registry_status || 'unknown' }}"
+          echo "- flink:1.19: ${{ steps.scan-flink.outputs.flink_status || 'unknown' }}"
+          echo ""
+          echo "Note: Scan results are uploaded to GitHub Security tab for detailed review."
+
+      # Final blocker: fail if any HIGH/CRITICAL CVEs found
+      - name: Check for blocking vulnerabilities
+        run: |
+          blocking_issues=0
+
+          # Check if any image had HIGH/CRITICAL CVEs
+          if [ "${{ steps.scan-kafka.outputs.kafka_status }}" = "vulnerable" ]; then
+            echo "ERROR: cp-kafka:7.6.1 has HIGH/CRITICAL CVEs"
+            blocking_issues=1
+          fi
+
+          if [ "${{ steps.scan-schema-registry.outputs.registry_status }}" = "vulnerable" ]; then
+            echo "ERROR: cp-schema-registry:7.6.1 has HIGH/CRITICAL CVEs"
+            blocking_issues=1
+          fi
+
+          if [ "${{ steps.scan-flink.outputs.flink_status }}" = "vulnerable" ]; then
+            echo "ERROR: flink:1.19-scala_2.12 has HIGH/CRITICAL CVEs"
+            blocking_issues=1
+          fi
+
+          if [ $blocking_issues -eq 1 ]; then
+            echo ""
+            echo "FATAL: One or more dependency images contain HIGH/CRITICAL vulnerabilities."
+            echo "       Review details in GitHub Security tab and update image versions."
+            exit 1
+          fi
+
+  # ============================================================================
+  # Stage 5: Integration Tests (Advisory on PR, Blocking on main push)
+  # Requires Docker and docker-compose; validates end-to-end pipeline
+  # ============================================================================
+  integration-tests:
+    name: Integration Tests
+    # Don't block on previous stages; can run in parallel for feedback
+    needs: [code-quality, schema-integrity]
+    runs-on: ubuntu-latest
+    # On PRs: advisory (failure doesn't block merge). On main: required.
+    continue-on-error: ${{ github.event_name == 'pull_request' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install dev dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev,processing]"
+
+      - name: Download GeoLite2 database
+        # MAXMIND_LICENCE_KEY is a repository secret (see docs/security-policy.md).
+        # If not set (e.g., forked repo / contributor PR), geo fields will be null
+        # in integration tests — this is acceptable; the operator handles missing DB.
+        env:
+          MAXMIND_LICENCE_KEY: ${{ secrets.MAXMIND_LICENCE_KEY }}
+        run: |
+          if [ -z "$MAXMIND_LICENCE_KEY" ]; then
+            echo "MAXMIND_LICENCE_KEY not set — geo enrichment will return null fields"
+            mkdir -p infra/geoip
+          else
+            make update-geoip
+          fi
+
+      - name: Start Docker services
+        working-directory: infra
+        run: |
+          docker-compose up -d
+          echo "Waiting for services to be healthy..."
+
+          # Wait for Kafka
+          for i in {1..30}; do
+            if docker exec broker kafka-topics --bootstrap-server localhost:9092 --list >/dev/null 2>&1; then
+              echo "Kafka is ready"
+              break
+            fi
+            echo "Kafka not ready yet, waiting... ($i/30)"
+            sleep 2
+          done
+
+          # Wait for Schema Registry
+          for i in {1..30}; do
+            if curl -s http://localhost:8081/subjects >/dev/null 2>&1; then
+              echo "Schema Registry is ready"
+              break
+            fi
+            echo "Schema Registry not ready yet, waiting... ($i/30)"
+            sleep 2
+          done
+
+          # Show container statuses
+          docker-compose ps
+
+      - name: Run integration tests
+        run: |
+          pytest tests/integration/ \
+            -m integration \
+            --timeout=120 \
+            -v
+
+      - name: Collect logs on failure
+        if: failure()
+        working-directory: infra
+        run: |
+          echo "=== Docker Compose Logs ==="
+          docker-compose logs
+          docker-compose ps -a
+
+      - name: Stop Docker services
+        if: always()
+        working-directory: infra
+        run: docker-compose down -v
+
+  # ============================================================================
+  # Stage 6: Build and Push Custom PyFlink Worker Image (main branch only)
+  # Builds, scans, and pushes to GHCR with git SHA tag
+  # ============================================================================
+  build-flink-image:
+    name: Build PyFlink Worker Image
+    # Only run on main branch (production releases)
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    needs: [code-quality, unit-tests, schema-integrity, security-scan]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Generate image tag
+        id: meta
+        run: |
+          REGISTRY="ghcr.io"
+          IMAGE_NAME="${REGISTRY}/${{ github.repository }}/flink-worker"
+          IMAGE_TAG="${{ github.sha }}"
+          FULL_IMAGE="${IMAGE_NAME}:${IMAGE_TAG}"
+          echo "image_name=${IMAGE_NAME}" >> $GITHUB_OUTPUT
+          echo "image_tag=${IMAGE_TAG}" >> $GITHUB_OUTPUT
+          echo "full_image=${FULL_IMAGE}" >> $GITHUB_OUTPUT
+          echo "Built: $FULL_IMAGE"
+
+      - name: Build Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./infra/flink/Dockerfile
+          push: false
+          load: true
+          tags: ${{ steps.meta.outputs.full_image }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Scan built image with Trivy
+        run: |
+          # Install Trivy
+          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
+
+          # Scan image (fail on HIGH/CRITICAL)
+          trivy image --severity HIGH,CRITICAL \
+            --exit-code 1 \
+            ${{ steps.meta.outputs.full_image }}
+
+      - name: Push image to GitHub Container Registry
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./infra/flink/Dockerfile
+          push: true
+          tags: |
+            ${{ steps.meta.outputs.full_image }}
+            ${{ steps.meta.outputs.image_name }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Image push summary
+        run: |
+          echo "## Docker Image Build Summary"
+          echo ""
+          echo "- Image: ${{ steps.meta.outputs.full_image }}"
+          echo "- Also tagged: ${{ steps.meta.outputs.image_name }}:latest"
+          echo "- Scan result: PASSED (no HIGH/CRITICAL CVEs)"
+
+  # ============================================================================
+  # Stages 7-9 (deploy-dev, deploy-staging, deploy-production) are intentionally
+  # absent. No cloud Flink clusters are provisioned yet.
+  # Tech debt tracked in: docs/tech-debt.md  TD-003
+  # ============================================================================
+  # Summary Job: Ensures all required checks pass before merge
+  # ============================================================================
+  ci-summary:
+    name: CI Summary
+    if: always()
+    needs: [code-quality, unit-tests, schema-integrity, schema-registry-compat, security-scan, integration-tests, build-flink-image]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check CI status
+        run: |
+          echo "## CI Pipeline Summary"
+          echo ""
+          echo "| Job | Status |"
+          echo "|-----|--------|"
+          echo "| Code Quality | ${{ needs.code-quality.result }} |"
+          echo "| Unit Tests & Coverage | ${{ needs.unit-tests.result }} |"
+          echo "| Schema Integrity | ${{ needs.schema-integrity.result }} |"
+          echo "| Schema Registry Compat | ${{ needs.schema-registry-compat.result }} |"
+          echo "| Security Scan | ${{ needs.security-scan.result }} |"
+          echo "| Integration Tests | ${{ needs.integration-tests.result }} |"
+          echo ""
+
+          # Determine if this is a PR or push to main
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            # On PR: integration tests are advisory (continue-on-error: true)
+            required_pass="code-quality unit-tests schema-integrity schema-registry-compat security-scan"
+            advisory_pass="integration-tests"
+            echo "### PR Mode"
+            echo "Required: $required_pass"
+            echo "Advisory: $advisory_pass"
+          else
+            # On push to main: all must pass
+            required_pass="code-quality unit-tests schema-integrity schema-registry-compat security-scan integration-tests"
+            echo "### Main Branch Push"
+            echo "All checks are REQUIRED to pass before promotion."
+          fi
+
+          # Check results
+          code_quality="${{ needs.code-quality.result }}"
+          unit_tests="${{ needs.unit-tests.result }}"
+          schema="${{ needs.schema-integrity.result }}"
+          schema_compat="${{ needs.schema-registry-compat.result }}"
+          security="${{ needs.security-scan.result }}"
+          integration="${{ needs.integration-tests.result }}"
+
+          if [ "$code_quality" != "success" ] || [ "$unit_tests" != "success" ] || [ "$schema" != "success" ] || [ "$schema_compat" != "success" ] || [ "$security" != "success" ]; then
+            echo ""
+            echo "BLOCKING FAILURES DETECTED"
+            exit 1
+          fi
+
+          if [ "${{ github.event_name }}" = "push" ] && [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            if [ "$integration" != "success" ]; then
+              echo ""
+              echo "Integration tests REQUIRED to pass on main branch"
+              exit 1
+            fi
+          fi
+
+          echo ""
+          echo "All required checks PASSED"

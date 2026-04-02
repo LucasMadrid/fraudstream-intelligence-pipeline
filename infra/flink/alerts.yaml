@@ -1,0 +1,98 @@
+# Prometheus alert rules for the Flink enrichment processor (002-flink-stream-processor)
+#
+# To apply: add this file to prometheus.yml rule_files section:
+#   rule_files:
+#     - /etc/prometheus/rules/flink-enrichment.yaml
+#
+# Test alert expressions locally:
+#   docker exec prometheus promtool check rules /etc/prometheus/rules/flink-enrichment.yaml
+
+groups:
+  - name: flink_enrichment_processor
+    interval: 30s
+    rules:
+
+      # ── Constitution Non-Negotiable: DLQ depth > 0 must be observable within 60s ──
+      # T044: Alert fires when any DLQ event is produced (rate > 0 over 60s window)
+      - alert: FraudStreamDLQEventsDetected
+        expr: |
+          sum(increase(dlq_events_total[60s])) > 0
+        for: 0m
+        labels:
+          severity: critical
+          component: flink-enrichment
+          constitution: "Non-Negotiable §DLQ"
+        annotations:
+          summary: "DLQ events detected in enrichment processor"
+          description: |
+            {{ $value }} event(s) routed to txn.processing.dlq in the last 60 seconds.
+            error_types: {{ $labels.error_type }}
+            Investigate immediately — DLQ events indicate schema failures,
+            late events beyond lateness window, or enrichment exceptions.
+          runbook: "Check txn.processing.dlq topic; inspect error_type field for triage."
+
+      # ── Constitution §II: Sub-100ms Decision Budget — enrichment slice < 20ms ──
+      # T048: Alert fires when p99 enrichment latency exceeds 20ms over 5-minute window
+      - alert: FraudStreamEnrichmentLatencyHigh
+        expr: |
+          histogram_quantile(
+            0.99,
+            sum(rate(enrichment_latency_ms_bucket[5m])) by (le)
+          ) > 20
+        for: 5m
+        labels:
+          severity: critical
+          component: flink-enrichment
+          constitution: "§II Sub-100ms Decision Budget"
+        annotations:
+          summary: "Enrichment p99 latency exceeds 20ms budget"
+          description: |
+            p99 enrichment latency is {{ $value }}ms (budget: 20ms).
+            Constitution §II: "Any component that cannot meet its budget slice is
+            a blocker, not a warning; breaches page on-call immediately."
+          runbook: |
+            1. Check Flink JVM/Python bridge bundle size (should be 1000).
+            2. Check GeoIP lookup latency (maxminddb-c extension installed?).
+            3. Check RocksDB state access latency (state.backend.rocksdb metrics).
+            4. Check Kafka consumer lag — back-pressure may indicate upstream slow-down.
+
+      # ── Watermark stall detection (spec edge case: all partitions stall) ──
+      # T032: Alert fires if watermark hasn't advanced in 60 seconds
+      - alert: FraudStreamWatermarkStalled
+        expr: |
+          (time() - last_watermark_advance_epoch) > 60
+        for: 0m
+        labels:
+          severity: warning
+          component: flink-enrichment
+        annotations:
+          summary: "Event-time watermark has not advanced in {{ $value | humanizeDuration }}"
+          description: |
+            The enrichment processor watermark has not advanced for {{ $value | humanizeDuration }}.
+            This may indicate a stalled Kafka partition, a paused producer, or a
+            TaskManager that has stopped receiving events.
+            Windows will not close and velocity state will not be evicted until the
+            watermark advances.
+          runbook: |
+            1. Check consumer lag on txn.api partitions.
+            2. Verify all TaskManagers are healthy in the Flink UI.
+            3. Check for idle partitions in kafka-consumer-groups output.
+
+      # ── Checkpoint failures ──────────────────────────────────────────────
+      - alert: FraudStreamCheckpointFailures
+        expr: |
+          increase(checkpoint_failures_total[5m]) > 0
+        for: 0m
+        labels:
+          severity: warning
+          component: flink-enrichment
+        annotations:
+          summary: "Flink checkpoint failures detected"
+          description: |
+            {{ $value }} checkpoint failure(s) in the last 5 minutes.
+            Repeated failures will delay exactly-once commit of enriched records
+            and increase recovery time after a job restart.
+          runbook: |
+            1. Check Flink UI → Job → Checkpoints tab for failure details.
+            2. Verify MinIO/S3 checkpoint storage is accessible.
+            3. Check TaskManager memory — RocksDB may be OOM if state is large.

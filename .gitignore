@@ -26,3 +26,6 @@ Thumbs.db
 .claude/
 .hypothesis/
 .specify/init-options.json
+infra/geoip/GeoLite2-City.mmdb
+infra/flink/CI_INTEGRATION.md
+infra/flink/DOCKERFILE.md

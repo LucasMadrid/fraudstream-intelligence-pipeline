@@ -24,6 +24,16 @@ dev = [
     "hypothesis>=6.100",
     "ruff>=0.4",
 ]
+processing = [
+    "apache-flink>=1.19",
+    "confluent-kafka[schema-registry]>=2.3",
+    "fastavro>=1.9",
+    "geoip2>=4.8",
+    "prometheus-client>=0.20",
+    "opentelemetry-sdk>=1.24",
+    "testcontainers[kafka]>=4",
+    "hypothesis>=6",
+]
 
 [tool.setuptools.packages.find]
 where = ["."]
@@ -34,6 +44,11 @@ testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
+markers = [
+    "integration: marks tests as integration tests requiring Docker",
+    "slow: marks tests as slow (high-volume latency/throughput assertions)",
+    "perf: marks tests as performance benchmarks (opt-in only)",
+]
 
 [tool.coverage.run]
 source = ["pipelines"]

@@ -1,0 +1,71 @@
+name: GeoLite2 Weekly Refresh
+
+# Closes: docs/tech-debt.md TD-004 (scheduled refresh)
+# See: docs/security-policy.md §MAXMIND_LICENCE_KEY in CI
+# See: specs/002-flink-stream-processor/checklists/cicd.md CHK016
+
+on:
+  schedule:
+    # Every Monday at 03:00 UTC
+    - cron: '0 3 * * 1'
+  workflow_dispatch:
+    # Allow manual trigger (e.g., after an urgent MaxMind DB update)
+
+jobs:
+  refresh-geoip:
+    name: Download and publish GeoLite2-City database
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download GeoLite2-City database
+        env:
+          MAXMIND_LICENCE_KEY: ${{ secrets.MAXMIND_LICENCE_KEY }}
+        run: |
+          if [ -z "$MAXMIND_LICENCE_KEY" ]; then
+            echo "ERROR: MAXMIND_LICENCE_KEY secret is not set."
+            echo "Register it at: Settings → Secrets and variables → Actions → New repository secret"
+            exit 1
+          fi
+
+          mkdir -p infra/geoip
+          make update-geoip
+
+          # Verify the downloaded file is a valid mmdb
+          file infra/geoip/GeoLite2-City.mmdb
+          ls -lh infra/geoip/GeoLite2-City.mmdb
+
+      - name: Validate mmdb with Python
+        run: |
+          pip install --quiet maxminddb
+          python3 - <<'EOF'
+          import maxminddb
+          with maxminddb.open_database("infra/geoip/GeoLite2-City.mmdb") as reader:
+              # Spot-check a known IP
+              record = reader.get("8.8.8.8")
+              assert record is not None, "Expected a record for 8.8.8.8"
+              print(f"Validation passed. Sample record for 8.8.8.8: {record}")
+          EOF
+
+      - name: Upload mmdb as workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: GeoLite2-City-${{ github.run_id }}
+          path: infra/geoip/GeoLite2-City.mmdb
+          retention-days: 14
+          # Production path (TD-003): upload to S3 instead:
+          # aws s3 cp infra/geoip/GeoLite2-City.mmdb s3://<bucket>/geoip/GeoLite2-City.mmdb
+
+      - name: Record refresh date
+        run: |
+          echo "GeoLite2-City database refreshed on $(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            >> infra/geoip/last-refresh.txt
+          cat infra/geoip/last-refresh.txt
+
+      - name: Notify on failure
+        if: failure()
+        run: |
+          echo "::error::GeoLite2 weekly refresh failed."
+          echo "Check MAXMIND_LICENCE_KEY secret and MaxMind account status."
+          echo "See docs/runbooks/credential-rotation.md for remediation steps."
