@@ -8,8 +8,6 @@ Test markers:
   slow        — high-volume latency assertion (T041)
 """
 
-import io
-import struct
 import time
 import uuid
 from decimal import Decimal
@@ -81,7 +79,9 @@ class TestSingleTransactionEnrichment:
         """
         pytest.skip("Flink mini-cluster integration — activate with Docker stack running")
 
-    def test_unresolvable_ip_enriches_with_null_geo_fields(self, flink_minicluster, kafka_bootstrap):
+    def test_unresolvable_ip_enriches_with_null_geo_fields(
+        self, flink_minicluster, kafka_bootstrap
+    ):
         """
         Given a transaction with an unresolvable IP subnet,
         When geolocation lookup fails,

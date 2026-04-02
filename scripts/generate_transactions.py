@@ -136,12 +136,18 @@ def _consume_enriched(bootstrap_servers: str, stop_event: threading.Event) -> No
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Synthetic transaction generator + enriched consumer")
-    parser.add_argument("--count", type=int, default=10, help="Number of transactions to produce (0 = unlimited)")
+    parser = argparse.ArgumentParser(
+        description="Synthetic transaction generator + enriched consumer"
+    )
+    parser.add_argument(
+        "--count", type=int, default=10, help="Number of transactions to produce (0 = unlimited)"
+    )
     parser.add_argument("--delay", type=int, default=500, help="Delay between messages (ms)")
     parser.add_argument("--kafka-brokers", default="localhost:9092")
     parser.add_argument("--schema-registry", default="http://localhost:8081")
-    parser.add_argument("--consume-only", action="store_true", help="Only consume txn.enriched, do not produce")
+    parser.add_argument(
+        "--consume-only", action="store_true", help="Only consume txn.enriched, do not produce"
+    )
     args = parser.parse_args()
 
     stop_event = threading.Event()
@@ -151,7 +157,7 @@ def main() -> None:
         daemon=True,
     )
     consumer_thread.start()
-    print(f"Consuming from txn.enriched (Ctrl+C to stop) ...")
+    print("Consuming from txn.enriched (Ctrl+C to stop) ...")
 
     if args.consume_only:
         try:
@@ -198,7 +204,10 @@ def main() -> None:
         pass
     finally:
         service.flush()
-        print(f"\nProduced {ok}/{i} messages. Waiting for enriched output (Ctrl+C again to exit)...")
+        print(
+            f"\nProduced {ok}/{i} messages. "
+            "Waiting for enriched output (Ctrl+C again to exit)..."
+        )
         try:
             time.sleep(5)
         except KeyboardInterrupt:

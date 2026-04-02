@@ -5,12 +5,12 @@ Every log record emits at minimum:
 """
 from __future__ import annotations
 
+import datetime
 import logging
 import logging.config
 import threading
-from datetime import timezone as _timezone
 
-UTC = _timezone.utc
+UTC = datetime.UTC
 
 # Thread-local store — operators set this before processing each record
 _tls = threading.local()
