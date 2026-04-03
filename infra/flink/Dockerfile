@@ -44,8 +44,10 @@ ENV PROCESSOR_VERSION=$PROCESSOR_VERSION \
     PATH="/opt/venv/bin:$PATH" \
     VIRTUAL_ENV="/opt/venv"
 
-# Only the runtime .so for maxminddb-c — no build tools
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# Upgrade OS packages to pick up security patches before Trivy scan
+# (base image ships with packages that have CVEs fixed in later apt versions)
+RUN apt-get update && apt-get upgrade -y --no-install-recommends \
+    && apt-get install -y --no-install-recommends \
     libmaxminddb0 \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
