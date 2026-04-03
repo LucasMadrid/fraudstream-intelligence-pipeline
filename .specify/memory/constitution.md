@@ -61,6 +61,49 @@ Every pipeline component emits structured logs, metrics, and traces; silent fail
 - Traces: distributed trace spanning ingestion → enrichment → scoring → decision (OpenTelemetry)  
 - A dead letter queue (DLQ) topic exists for each pipeline stage; DLQ depth > 0 triggers an alert within 60 seconds
 
+### IX. Analytics-First Persistence (NON-NEGOTIABLE)
+Every enriched transaction and every fraud decision MUST be durably persisted to the event store and made queryable by downstream analytics, ML training, and audit consumers — the streaming pipeline is not a black box.  
+- **Enriched transactions sink**: The stream processor MUST write each `EnrichedTransaction` record to an append-only Iceberg table (`iceberg.enriched_transactions`) in addition to publishing to the Kafka output topic — the write is a mandatory side output, not optional  
+- **Fraud decisions sink**: The scoring engine MUST write each `ScoringOutput` record (decision, fraud score, rule triggers, model version, latency) to a separate Iceberg table (`iceberg.fraud_decisions`) keyed by `transaction_id`  
+- **Feature materialization**: Computed velocity, geolocation, and device fingerprint features MUST be materialized to the Feast feature store on every enrichment cycle, making them available for both online serving (low-latency lookup during inference) and offline training (point-in-time correct feature snapshots)  
+- **Analytics query layer**: An always-on SQL query engine (Trino locally; Athena/BigQuery in cloud) MUST be able to join `enriched_transactions` and `fraud_decisions` on `transaction_id` without requiring custom code — schema evolution in Iceberg tables follows the same Schema Registry versioning discipline as Kafka topics  
+- **No analytics-only writes to Kafka**: Iceberg is the analytics source of truth; ad-hoc analytics pipelines MUST NOT re-consume raw Kafka topics as a substitute for a missing persistence layer  
+- **Write latency budget**: Iceberg sink writes MUST complete within 5 seconds of the Kafka consumer receipt — this is outside the 100 ms scoring hot path and MUST NOT add latency to the decision response
+
+### X. Analytics Consumer Layer
+A dedicated, independent consumer component owns all reporting and interactive analytics — it is strictly read-only relative to the pipeline and MUST NOT influence any scoring or enrichment decision.  
+
+**Data sources (dual-mode):**
+- **Real-time feed** — Kafka consumer on `txn.decisions` for live dashboards (sub-second event visibility); consumer group `analytics.dashboard` with `auto.offset.reset = latest`  
+- **Historical store** — Trino queries over `iceberg.enriched_transactions` and `iceberg.fraud_decisions` for reports, drill-down, and ML audit
+
+**Reporting tools hierarchy:**
+| Layer | Tool | Purpose |
+|---|---|---|
+| Interactive app | **Streamlit** | Primary UI — live fraud dashboard, historical reports, and (future) rule engine config |
+| Operational metrics | Grafana | Infrastructure / SLO dashboards (latency, DLQ, throughput) — unchanged |
+| Ad-hoc SQL | Trino | Data team exploration and scheduled report queries |
+| BI (optional) | Apache Superset | Self-serve dashboards for non-engineering stakeholders |
+
+**Streamlit app responsibilities (v1):**
+- Live transaction feed with decision overlay (real-time Kafka consumer, refreshed via `st.empty()` loop)  
+- Fraud rate by channel, merchant, and geo over configurable rolling windows (Trino → Iceberg)  
+- Rule trigger frequency leaderboard — which rules fire most, false-positive rate per rule  
+- Model version comparison — fraud score distribution per model version over a chosen time range  
+- DLQ inspector — browse dead-letter records without direct Kafka access
+
+**Streamlit app responsibilities (v2 — rule engine config UI, future spec):**
+- CRUD interface for rule definitions (thresholds, conditions, enabled/disabled)  
+- Rule test harness — submit a synthetic transaction and show which rules would fire  
+- Rule change audit log — who changed what, when, with before/after diff  
+- Config changes MUST be written to a `txn.rules.config` Kafka topic consumed by the rule engine; Streamlit MUST NOT write rule state directly to any store the scoring engine reads
+
+**Constraints:**
+- The analytics consumer MUST run as an independent process/service — it MUST NOT be co-located with the scoring engine or stream processor  
+- It MUST use a separate Kafka consumer group and MUST NOT affect topic offsets consumed by scoring/processing  
+- Streamlit sessions MUST NOT cache PII beyond the minimum required to render the current view; masked values from Iceberg are displayed as-is  
+- The analytics service is non-critical-path: its unavailability MUST NOT affect fraud scoring SLOs
+
 ---
 
 ## Data Contracts
@@ -96,6 +139,56 @@ Every pipeline component emits structured logs, metrics, and traces; silent fail
 }
 ```
 
+### Iceberg Analytics Tables (write path — mandatory per Principle IX)
+
+**`iceberg.enriched_transactions`** — written by the stream processor as a side output
+```json
+{
+  "transaction_id":    "uuid        (partition key)",
+  "account_id":        "string",
+  "merchant_id":       "string",
+  "amount":            "decimal",
+  "currency":          "ISO-4217",
+  "event_timestamp":   "epoch_ms   (event time — used for Iceberg partitioning by day)",
+  "enrichment_time":   "epoch_ms   (processing time — when sink write occurred)",
+  "channel":           "enum[POS, WEB, MOBILE, API]",
+  "vel_count_1m":      "int",
+  "vel_count_5m":      "int",
+  "vel_count_1h":      "int",
+  "vel_count_24h":     "int",
+  "vel_amount_1m":     "decimal",
+  "vel_amount_5m":     "decimal",
+  "vel_amount_1h":     "decimal",
+  "vel_amount_24h":    "decimal",
+  "geo_country":       "string",
+  "geo_city":          "string",
+  "geo_network_class": "enum[RESIDENTIAL, BUSINESS, HOSTING, MOBILE, UNKNOWN]",
+  "geo_confidence":    "float [0.0–1.0]",
+  "device_first_seen": "epoch_ms",
+  "device_txn_count":  "int",
+  "device_known_fraud":"bool",
+  "schema_version":    "string"
+}
+```
+Partitioned by `event_timestamp` (daily). `transaction_id` is the deduplication key.
+
+**`iceberg.fraud_decisions`** — written by the scoring engine
+```json
+{
+  "transaction_id":  "uuid        (join key to enriched_transactions)",
+  "decision":        "enum[ALLOW, FLAG, BLOCK]",
+  "fraud_score":     "float [0.0–1.0]",
+  "rule_triggers":   "array<string>",
+  "model_version":   "string",
+  "decision_time":   "epoch_ms   (used for Iceberg partitioning by day)",
+  "latency_ms":      "int",
+  "schema_version":  "string"
+}
+```
+Partitioned by `decision_time` (daily). `transaction_id` is the deduplication key.
+
+---
+
 ### Channel-Specific Extra Fields
 | Channel | Required extra fields |
 |---|---|
@@ -117,6 +210,9 @@ Every pipeline component emits structured logs, metrics, and traces; silent fail
 | Hot store | Redis (Docker) |
 | Event store | MinIO + Apache Iceberg |
 | Feature store | Feast (local SQLite backend) |
+| Analytics query engine | Trino (Docker) — queries Iceberg tables on MinIO |
+| Analytics UI | Streamlit (Docker) — live dashboard + historical reports |
+| BI (optional) | Apache Superset (Docker) — self-serve SQL dashboards |
 | ML serving | MLflow local server / ONNX Runtime |
 | Orchestration | Docker Compose + Makefile |
 | Observability | Prometheus + Grafana (Docker) |
@@ -129,6 +225,9 @@ Every pipeline component emits structured logs, metrics, and traces; silent fail
 | Hot store | AWS ElastiCache (Redis) · Aerospike |
 | Event store | S3/GCS + Apache Iceberg · Delta Lake |
 | Feature store | Feast on K8s · Hopsworks · Tecton |
+| Analytics query engine | AWS Athena · GCP BigQuery · Trino on K8s |
+| Analytics UI | Streamlit on K8s (or managed container) |
+| BI (optional) | Apache Superset on K8s · AWS QuickSight |
 | ML serving | SageMaker · Vertex AI · Seldon |
 | Orchestration | Kubernetes · Terraform · Helm |
 | Observability | Datadog · Grafana Cloud · AWS CloudWatch |
@@ -157,10 +256,22 @@ fraud-detection-streaming/
 │   ├── training/                 # offline training notebooks, feature selection
 │   └── serving/                  # MLflow / ONNX serving wrapper, version registry
 ├── storage/
-│   ├── feature_store/            # Feast repo, feature views, data sources
-│   └── lake/                     # Iceberg table definitions, schema migrations
+│   ├── feature_store/            # Feast repo, feature views, data sources, materialization jobs
+│   └── lake/                     # Iceberg table definitions, schema migrations, Trino catalog config
+├── analytics/
+│   ├── app/                      # Streamlit app (pages: live feed, fraud rate, rules, DLQ inspector)
+│   │   ├── pages/
+│   │   │   ├── 1_live_feed.py    # real-time Kafka consumer dashboard
+│   │   │   ├── 2_fraud_rate.py   # historical Trino → Iceberg reports
+│   │   │   ├── 3_rule_triggers.py# rule leaderboard and false-positive analysis
+│   │   │   ├── 4_model_compare.py# fraud score distribution per model version
+│   │   │   └── 5_dlq_inspector.py# dead-letter queue browser
+│   │   └── Home.py               # entry point, shared Kafka/Trino client init
+│   ├── consumers/                # Kafka consumer wrapper (group: analytics.dashboard)
+│   ├── queries/                  # Trino SQL query library (parameterized, versioned)
+│   └── reports/                  # scheduled report definitions (cron + Trino queries)
 ├── monitoring/
-│   ├── dashboards/               # Grafana JSON (fraud rate, latency, DLQ depth)
+│   ├── dashboards/               # Grafana JSON (latency, DLQ depth, throughput — ops metrics only)
 │   └── alerts/                   # Prometheus alerting rules
 ├── tests/
 │   ├── unit/                     # per-component unit tests
@@ -182,6 +293,13 @@ fraud-detection-streaming/
 - [ ] Schema migration plan — every schema change ships with a consumer migration guide and a deprecation date for the old topic
 - [ ] Fraud rate baseline — 24-hour rolling mean established in staging; production alert fires on > 3σ deviation
 - [ ] Every component should be tested at least 80% code coverage
+- [ ] Analytics sink verified — `iceberg.enriched_transactions` and `iceberg.fraud_decisions` tables queryable via Trino/Athena before production promotion; row count must match Kafka topic offset within 0.1%
+- [ ] Feast materialization verified — feature values for a test account are retrievable from the online store within 5 seconds of the enrichment event being published to Kafka
+- [ ] Point-in-time correctness — offline Feast feature snapshots for a replayed event sequence match the values observed at enrichment time (no future leakage)
+- [ ] Analytics consumer isolation verified — `analytics.dashboard` consumer group offset does not interfere with scoring or processing consumer groups under load
+- [ ] Streamlit live feed lag — real-time dashboard reflects a new decision within 2 seconds of it being published to `txn.decisions` under normal load
+- [ ] Streamlit historical report accuracy — fraud rate figures from Streamlit/Trino match the figures from a direct Iceberg table scan for the same time window (zero discrepancy)
+- [ ] Analytics service failure isolation — taking down the Streamlit service and Trino container has zero effect on fraud scoring latency and throughput SLOs
 
 ---
 
@@ -199,4 +317,4 @@ All pull requests must include a checklist item confirming compliance with the r
 
 ---
 
-**Version**: 1.0.0 | **Ratified**: 2026-03-30 | **Last Amended**: 2026-03-30
+**Version**: 1.2.0 | **Ratified**: 2026-03-30 | **Last Amended**: 2026-04-03
